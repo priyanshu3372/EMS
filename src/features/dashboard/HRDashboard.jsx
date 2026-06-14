@@ -1,0 +1,383 @@
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  PieChart, Pie, Cell,
+} from 'recharts'
+import {
+  Users, UserCheck, UserMinus, Clock, TrendingUp,
+  CheckCircle, XCircle, AlertCircle, CalendarDays, ChevronRight, Coffee,
+} from 'lucide-react'
+import { useDashboardStats, useApproveLeaveDashboard } from '../../hooks/useDashboard'
+
+const LEAVE_TYPE_LABELS = {
+  sick: 'Sick Leave',
+  casual: 'Casual Leave',
+  earned: 'Earned Leave',
+  wfh: 'WFH',
+  maternity: 'Maternity Leave',
+  paternity: 'Paternity Leave',
+  comp_off: 'Comp Off',
+}
+
+const LEAVE_TYPE_COLORS = {
+  sick: 'bg-red-100 text-red-700',
+  casual: 'bg-blue-100 text-blue-700',
+  earned: 'bg-purple-100 text-purple-700',
+  wfh: 'bg-teal-100 text-teal-700',
+  maternity: 'bg-pink-100 text-pink-700',
+  paternity: 'bg-indigo-100 text-indigo-700',
+  comp_off: 'bg-orange-100 text-orange-700',
+}
+
+function initials(name) {
+  return (name || '')
+    .split(' ')
+    .slice(0, 2)
+    .map(w => w[0])
+    .join('')
+    .toUpperCase()
+}
+
+function formatDate(str) {
+  if (!str) return ''
+  return new Date(str).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
+function AttendanceTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) return null
+  return (
+    <div className="bg-white border border-gray-200 rounded-lg shadow-lg p-3 text-xs">
+      <p className="font-semibold text-gray-900 mb-2">{label}</p>
+      <p className="text-green-600">Present: <span className="font-medium">{payload[0]?.value}</span></p>
+      <p className="text-red-500">Absent: <span className="font-medium">{payload[1]?.value}</span></p>
+    </div>
+  )
+}
+
+function DeptLegend({ data }) {
+  const total = data.reduce((s, d) => s + d.value, 0)
+  return (
+    <ul className="space-y-2 mt-2">
+      {data.map((d) => (
+        <li key={d.name} className="flex items-center justify-between text-xs">
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: d.color }} />
+            <span className="text-gray-600">{d.name}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-gray-900">{d.value}</span>
+            <span className="text-gray-400 w-8 text-right">{total ? Math.round(d.value / total * 100) : 0}%</span>
+          </div>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function StatCard({ label, value, change, icon: Icon, iconBg, iconColor }) {
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 flex items-center gap-4">
+      <div className={`${iconBg} rounded-xl p-3 shrink-0`}>
+        <Icon className={`w-6 h-6 ${iconColor}`} />
+      </div>
+      <div className="min-w-0">
+        <p className="text-2xl font-bold text-gray-900">{value}</p>
+        <p className="text-sm text-gray-500 leading-none mt-0.5">{label}</p>
+        {change && (
+          <div className="flex items-center gap-1 mt-1.5">
+            <TrendingUp className="w-3 h-3 text-green-500" />
+            <span className="text-xs text-gray-400 truncate max-w-[150px]" title={change}>{change}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+export default function HRDashboard() {
+  const { data, isLoading, error } = useDashboardStats()
+  const approveLeave = useApproveLeaveDashboard()
+
+  const today = new Date().toLocaleDateString('en-IN', {
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+  })
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center h-64 text-red-500 text-sm">
+        Failed to load dashboard data.
+      </div>
+    )
+  }
+
+  const {
+    totalEmployees, presentToday, onLeaveToday, weeklyOffToday, deptWeeklyOff,
+    pendingLeaveCount, pendingLeaves, deptData, weekData, recentJoiners,
+  } = data
+
+  const attendancePct = totalEmployees > 0 ? Math.round(presentToday / totalEmployees * 100) : 0
+
+  const weeklyOffChangeText = Object.entries(deptWeeklyOff || {})
+    .map(([dept, count]) => `${dept}: ${count}`)
+    .join(', ') || 'No employees'
+
+  return (
+    <div className="space-y-6">
+
+      {/* Page header */}
+      <div>
+        <h2 className="text-2xl font-bold text-gray-900">HR Dashboard</h2>
+        <p className="text-sm text-gray-500 mt-0.5">{today} · Overview of your workforce</p>
+      </div>
+
+      {/* ── Stat cards ─────────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-5">
+        <StatCard
+          label="Total Employees"
+          value={totalEmployees}
+          change={`${recentJoiners.length} joined recently`}
+          icon={Users}
+          iconBg="bg-blue-100"
+          iconColor="text-blue-600"
+        />
+        <StatCard
+          label="Present Today"
+          value={presentToday}
+          change={`${attendancePct}% attendance`}
+          icon={UserCheck}
+          iconBg="bg-green-100"
+          iconColor="text-green-600"
+        />
+        <StatCard
+          label="On Leave Today"
+          value={onLeaveToday}
+          icon={UserMinus}
+          iconBg="bg-amber-100"
+          iconColor="text-amber-600"
+        />
+        <StatCard
+          label="Weekly Off Today"
+          value={weeklyOffToday}
+          change={weeklyOffChangeText}
+          icon={Coffee}
+          iconBg="bg-indigo-100"
+          iconColor="text-indigo-600"
+        />
+        <StatCard
+          label="Pending Approvals"
+          value={pendingLeaveCount}
+          change={`${pendingLeaveCount} leave request${pendingLeaveCount !== 1 ? 's' : ''}`}
+          icon={Clock}
+          iconBg="bg-red-100"
+          iconColor="text-red-600"
+        />
+      </div>
+
+      {/* ── Charts row ─────────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+
+        {/* Attendance bar chart — 2/3 width */}
+        <div className="lg:col-span-2 bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+          <div className="flex items-center justify-between mb-5">
+            <div>
+              <p className="text-base font-semibold text-gray-900">Weekly Attendance</p>
+              <p className="text-xs text-gray-400 mt-0.5">Present vs Absent — this week</p>
+            </div>
+            <span className="text-xs font-medium text-blue-600 bg-blue-50 px-2.5 py-1 rounded-full">
+              {totalEmployees} total
+            </span>
+          </div>
+          {weekData.length === 0 ? (
+            <div className="flex items-center justify-center h-[220px] text-gray-400 text-sm">
+              No attendance data for this week yet
+            </div>
+          ) : (
+            <>
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={weekData} barSize={18} barGap={4}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" vertical={false} />
+                  <XAxis dataKey="day" tick={{ fontSize: 11, fill: '#94A3B8' }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 11, fill: '#94A3B8' }} axisLine={false} tickLine={false} width={28} />
+                  <Tooltip content={<AttendanceTooltip />} cursor={{ fill: '#F8FAFC' }} />
+                  <Bar dataKey="present" name="Present" fill="#2563EB" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="absent" name="Absent" fill="#FEE2E2" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+              <div className="flex items-center gap-5 mt-3">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded-sm bg-blue-600" />
+                  <span className="text-xs text-gray-500">Present</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded-sm bg-red-100" />
+                  <span className="text-xs text-gray-500">Absent</span>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Department donut — 1/3 width */}
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+          <div className="mb-4">
+            <p className="text-base font-semibold text-gray-900">By Department</p>
+            <p className="text-xs text-gray-400 mt-0.5">Headcount distribution</p>
+          </div>
+          {deptData.length === 0 ? (
+            <div className="flex items-center justify-center h-40 text-gray-400 text-sm">No data</div>
+          ) : (
+            <>
+              <ResponsiveContainer width="100%" height={160}>
+                <PieChart>
+                  <Pie
+                    data={deptData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={46}
+                    outerRadius={72}
+                    paddingAngle={3}
+                    dataKey="value"
+                    strokeWidth={0}
+                  >
+                    {deptData.map((entry) => (
+                      <Cell key={entry.name} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    formatter={(val, name) => [`${val} employees`, name]}
+                    contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #E2E8F0' }}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+              <DeptLegend data={deptData} />
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* ── Bottom row ─────────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+
+        {/* Pending approvals — 2/3 */}
+        <div className="lg:col-span-2 bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+            <div>
+              <p className="text-base font-semibold text-gray-900">Pending Approvals</p>
+              <p className="text-xs text-gray-400 mt-0.5">
+                {pendingLeaves.length} request{pendingLeaves.length !== 1 ? 's' : ''} awaiting action
+              </p>
+            </div>
+          </div>
+
+          {pendingLeaves.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 text-gray-400">
+              <CheckCircle className="w-8 h-8 mb-2 text-green-400" />
+              <p className="text-sm">All caught up — no pending approvals</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-gray-50">
+              {pendingLeaves.map((req) => {
+                const name = req.profiles?.full_name ?? 'Unknown'
+                const dept = req.profiles?.department ?? ''
+                const typeLabel = LEAVE_TYPE_LABELS[req.leave_type] ?? req.leave_type
+                const typeColor = LEAVE_TYPE_COLORS[req.leave_type] ?? 'bg-gray-100 text-gray-700'
+                const from = formatDate(req.from_date)
+                const to = req.to_date !== req.from_date ? ` – ${formatDate(req.to_date)}` : ''
+
+                return (
+                  <div key={req.id} className="flex items-center gap-4 px-5 py-3.5 hover:bg-gray-50 transition-colors">
+                    <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
+                      <span className="text-blue-700 text-xs font-semibold">{initials(name)}</span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-sm font-medium text-gray-900">{name}</p>
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${typeColor}`}>
+                          {typeLabel}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-xs text-gray-400">{dept}</span>
+                        <span className="text-gray-200">·</span>
+                        <CalendarDays className="w-3 h-3 text-gray-400" />
+                        <span className="text-xs text-gray-500">{from}{to}</span>
+                        <span className="text-xs text-gray-400">({req.days}d)</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={() => approveLeave.mutate({ id: req.id, status: 'approved' })}
+                        disabled={approveLeave.isPending}
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-green-50 hover:bg-green-100 text-green-700 text-xs font-medium transition-colors disabled:opacity-50"
+                      >
+                        <CheckCircle className="w-3.5 h-3.5" />
+                        Approve
+                      </button>
+                      <button
+                        onClick={() => approveLeave.mutate({ id: req.id, status: 'rejected' })}
+                        disabled={approveLeave.isPending}
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 text-xs font-medium transition-colors disabled:opacity-50"
+                      >
+                        <XCircle className="w-3.5 h-3.5" />
+                        Reject
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Recent joiners — 1/3 */}
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+            <div>
+              <p className="text-base font-semibold text-gray-900">Recent Joiners</p>
+              <p className="text-xs text-gray-400 mt-0.5">Last 60 days</p>
+            </div>
+          </div>
+
+          {recentJoiners.length === 0 ? (
+            <div className="flex items-center justify-center py-12 text-gray-400 text-sm">
+              No recent joiners
+            </div>
+          ) : (
+            <div className="divide-y divide-gray-50">
+              {recentJoiners.map((emp) => (
+                <div key={emp.id} className="flex items-center gap-3 px-5 py-4 hover:bg-gray-50 transition-colors">
+                  <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center shrink-0">
+                    <span className="text-slate-600 text-xs font-semibold">{initials(emp.full_name)}</span>
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-gray-900 truncate">{emp.full_name}</p>
+                    <p className="text-xs text-gray-500 truncate">{emp.designation}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">{formatDate(emp.date_of_joining)}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {recentJoiners.length > 0 && (
+            <div className="mx-4 mb-4 mt-2 p-3 rounded-lg bg-blue-50 border border-blue-100">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-blue-600 shrink-0" />
+                <p className="text-xs text-blue-700 font-medium">
+                  {recentJoiners.length} new joiner{recentJoiners.length !== 1 ? 's' : ''} recently
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
