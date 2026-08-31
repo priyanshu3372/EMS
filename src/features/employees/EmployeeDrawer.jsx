@@ -1,4 +1,10 @@
-import { X, Mail, Phone, Building2, Briefcase, Calendar, BadgeCheck, FileText, Edit2, Users } from 'lucide-react'
+import { createElement, useState } from 'react'
+import {
+  X, Mail, Phone, Building2, Briefcase, Calendar, BadgeCheck, FileText, Edit2, Users, IndianRupee,
+  Landmark, CheckCircle2, XCircle, ShieldCheck
+} from 'lucide-react'
+import { useSalaryStructures } from '../../hooks/usePayroll'
+import BankVerificationModal from '../payroll/BankVerificationModal'
 
 const STATUS_CLASS = {
   active: 'bg-green-100 text-green-700',
@@ -12,10 +18,42 @@ const EMP_TYPE_CLASS = {
   Intern: 'bg-teal-100 text-teal-700',
 }
 
+function computeSalary(ctc) {
+  const gross = Math.round((ctc || 0) / 12)
+  const basic = Math.round(gross * 0.40)
+  const hra = Math.round(basic * 0.50)
+  const da = Math.round(basic * 0.10)
+  const special = Math.max(0, gross - basic - hra - da)
+  const pf = Math.round(basic * 0.12)
+  const esi = gross <= 21000 ? Math.round(gross * 0.0075) : 0
+  const pt = gross > 10000 ? 200 : 0
+  const net = Math.max(0, gross - pf - esi - pt)
+  return { gross, basic, hra, da, special, pf, esi, pt, net }
+}
+
+function fmt(n) { return '₹' + Number(n || 0).toLocaleString('en-IN') }
+
 export default function EmployeeDrawer({ employee, onClose, onEdit }) {
+  const { data: salaryStructures = [] } = useSalaryStructures()
+  const [bankModalOpen, setBankModalOpen] = useState(false)
+  const [bankModalMode, setBankModalMode] = useState('review')
+
   if (!employee) return null
 
   const initials = employee.full_name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()
+  const ssRecord = salaryStructures.find(s => s.employee_id === employee.id || s.profiles?.id === employee.id)
+  const ctcVal = employee.ctc || ssRecord?.ctc || 0
+  const computed = computeSalary(ctcVal)
+
+  const grossMonthly = ssRecord?.gross ?? computed.gross
+  const basic = ssRecord?.basic ?? computed.basic
+  const hra = ssRecord?.hra ?? computed.hra
+  const da = ssRecord?.da ?? computed.da
+  const special = ssRecord?.special_allowance ?? computed.special
+  const pf = ssRecord?.pf ?? computed.pf
+  const esi = ssRecord?.esi ?? computed.esi
+  const pt = ssRecord?.pt ?? computed.pt
+  const netMonthly = ssRecord?.net_salary ?? computed.net
 
   return (
     <>
@@ -81,6 +119,94 @@ export default function EmployeeDrawer({ employee, onClose, onEdit }) {
               <InfoRow icon={Users} label="Reporting Manager" value={employee.reporting_manager_name ? `${employee.reporting_manager_name} (${employee.reporting_manager_designation || 'Manager'})` : '—'} />
             </Section>
 
+            <Section title="Salary & Compensation">
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs text-slate-400 font-medium">Annual CTC</p>
+                    <p className="text-lg font-bold text-slate-900">{fmt(ctcVal)}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xs text-slate-400 font-medium">Net Take-Home / mo</p>
+                    <p className="text-base font-bold text-emerald-600">{fmt(netMonthly)}</p>
+                  </div>
+                </div>
+
+                <div className="border-t border-slate-200/80 pt-2.5 grid grid-cols-2 gap-2 text-xs">
+                  <div>
+                    <span className="text-slate-400">Gross / Month:</span> <span className="font-semibold text-slate-700">{fmt(grossMonthly)}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400">Basic Pay:</span> <span className="font-semibold text-slate-700">{fmt(basic)}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400">HRA:</span> <span className="font-semibold text-slate-700">{fmt(hra)}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400">DA:</span> <span className="font-semibold text-slate-700">{fmt(da)}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400">Special Allowance:</span> <span className="font-semibold text-slate-700">{fmt(special)}</span>
+                  </div>
+                </div>
+
+                <div className="bg-white p-2.5 rounded-lg border border-slate-200/60 flex items-center justify-between text-xs">
+                  <span className="text-slate-500 font-medium">Standard Deductions (PF, ESI, PT)</span>
+                  <span className="font-bold text-red-500">− {fmt((pf || 0) + (esi || 0) + (pt || 0))}</span>
+                </div>
+              </div>
+            </Section>
+
+            <Section title="Bank Account for Salary Credit">
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Landmark className="w-4 h-4 text-blue-600" />
+                    <span className="text-sm font-semibold text-slate-900">{employee.bank_name || 'Bank details pending'}</span>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setBankModalMode('review')
+                      setBankModalOpen(true)
+                    }}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 text-xs font-semibold transition-colors"
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5" /> Verify / Manage
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 text-xs pt-1 border-t border-slate-200/80">
+                  <div>
+                    <span className="text-slate-400">Account No:</span>{' '}
+                    <span className="font-mono font-bold text-slate-800">{employee.bank_account || '—'}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400">IFSC Code:</span>{' '}
+                    <span className="font-mono font-semibold text-blue-700">{employee.ifsc || '—'}</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between text-xs pt-2 border-t border-slate-200/60">
+                  <span className="text-slate-500 font-medium">Status</span>
+                  {employee.bank_verification_status === 'verified' && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-800">
+                      <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Verified
+                    </span>
+                  )}
+                  {(employee.bank_verification_status === 'pending' || !employee.bank_verification_status) && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-100 text-amber-800">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" /> Pending
+                    </span>
+                  )}
+                  {employee.bank_verification_status === 'rejected' && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-rose-100 text-rose-800">
+                      <XCircle className="w-3 h-3 text-rose-600" /> Rejected
+                    </span>
+                  )}
+                </div>
+              </div>
+            </Section>
+
             <Section title="Documents">
               <div className="space-y-2">
                 {['Offer Letter', 'Aadhaar Card', 'PAN Card'].map((doc) => (
@@ -98,6 +224,13 @@ export default function EmployeeDrawer({ employee, onClose, onEdit }) {
           </div>
         </div>
       </div>
+
+      <BankVerificationModal
+        open={bankModalOpen}
+        onClose={() => setBankModalOpen(false)}
+        profile={employee}
+        mode={bankModalMode}
+      />
     </>
   )
 }
@@ -111,11 +244,11 @@ function Section({ title, children }) {
   )
 }
 
-function InfoRow({ icon: Icon, label, value }) {
+function InfoRow({ icon, label, value }) {
   return (
     <div className="flex items-start gap-3">
       <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center shrink-0 mt-0.5">
-        <Icon className="w-4 h-4 text-gray-500" />
+        {createElement(icon, { className: 'w-4 h-4 text-gray-500' })}
       </div>
       <div>
         <p className="text-xs text-gray-400">{label}</p>

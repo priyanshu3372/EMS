@@ -80,11 +80,25 @@ export default function Employees() {
     setMenuOpenId(null)
   }
 
-  const SortIcon = ({ col }) => {
-    if (sortKey !== col) return <ChevronUp className="w-3 h-3 text-gray-300" />
-    return sortDir === 'asc'
-      ? <ChevronUp className="w-3 h-3 text-blue-500" />
-      : <ChevronDown className="w-3 h-3 text-blue-500" />
+  function handleExport() {
+    const headers = ['Full Name', 'Employee ID', 'Department', 'Designation', 'Phone', 'Employment Type', 'Date of Joining', 'Status', 'CTC']
+    const rows = filtered.map((e) => [
+      e.full_name || '',
+      e.employee_id || '',
+      e.department || '',
+      e.designation || '',
+      e.phone || '',
+      e.employment_type || '',
+      e.date_of_joining || '',
+      e.status || '',
+      e.ctc || 0,
+    ])
+    const lines = [headers.join(','), ...rows.map((r) => r.map((v) => `"${v}"`).join(','))]
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = `employees_${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
   }
 
   return (
@@ -98,7 +112,7 @@ export default function Employees() {
             <p className="text-sm text-gray-500 mt-0.5">{employees.length} total employees</p>
           </div>
           <div className="flex items-center gap-2">
-            <button className="flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 text-sm font-medium text-gray-700 transition-colors">
+            <button onClick={handleExport} className="flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 text-sm font-medium text-gray-700 transition-colors">
               <Download className="w-4 h-4" />
               Export
             </button>
@@ -146,10 +160,10 @@ export default function Employees() {
             <table className="w-full min-w-[800px]">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200">
-                  <Th onClick={() => toggleSort('full_name')} className="pl-5">Employee <SortIcon col="full_name" /></Th>
-                  <Th onClick={() => toggleSort('employee_id')}>ID <SortIcon col="employee_id" /></Th>
-                  <Th onClick={() => toggleSort('department')}>Department <SortIcon col="department" /></Th>
-                  <Th onClick={() => toggleSort('date_of_joining')}>Joined <SortIcon col="date_of_joining" /></Th>
+                  <Th onClick={() => toggleSort('full_name')} className="pl-5">Employee {sortKey === 'full_name' ? (sortDir === 'asc' ? <ChevronUp className="w-3 h-3 text-blue-500 inline" /> : <ChevronDown className="w-3 h-3 text-blue-500 inline" />) : <ChevronUp className="w-3 h-3 text-gray-300 inline" />}</Th>
+                  <Th onClick={() => toggleSort('employee_id')}>ID {sortKey === 'employee_id' ? (sortDir === 'asc' ? <ChevronUp className="w-3 h-3 text-blue-500 inline" /> : <ChevronDown className="w-3 h-3 text-blue-500 inline" />) : <ChevronUp className="w-3 h-3 text-gray-300 inline" />}</Th>
+                  <Th onClick={() => toggleSort('department')}>Department {sortKey === 'department' ? (sortDir === 'asc' ? <ChevronUp className="w-3 h-3 text-blue-500 inline" /> : <ChevronDown className="w-3 h-3 text-blue-500 inline" />) : <ChevronUp className="w-3 h-3 text-gray-300 inline" />}</Th>
+                  <Th onClick={() => toggleSort('date_of_joining')}>Joined {sortKey === 'date_of_joining' ? (sortDir === 'asc' ? <ChevronUp className="w-3 h-3 text-blue-500 inline" /> : <ChevronDown className="w-3 h-3 text-blue-500 inline" />) : <ChevronUp className="w-3 h-3 text-gray-300 inline" />}</Th>
                   <Th>Type</Th>
                   <Th>Status</Th>
                   <Th className="text-right pr-5">Actions</Th>
@@ -164,7 +178,7 @@ export default function Employees() {
                   <tr>
                     <td colSpan={7} className="text-center py-16 text-sm text-gray-400">No employees found.</td>
                   </tr>
-                ) : filtered.map((emp) => (
+                ) : filtered.map((emp, index) => (
                   <tr key={emp.id}
                     className="border-b border-gray-100 hover:bg-gray-50 transition-colors cursor-pointer"
                     onClick={() => openDrawer(emp)}>
@@ -214,7 +228,7 @@ export default function Employees() {
                         {menuOpenId === emp.id && (
                           <>
                             <div className="fixed inset-0 z-10" onClick={() => setMenuOpenId(null)} />
-                            <div className="absolute right-0 top-full mt-1 w-40 bg-white rounded-xl border border-gray-200 shadow-lg z-20 overflow-hidden py-1">
+                            <div className={`absolute right-0 ${index >= Math.max(1, filtered.length - 2) ? 'bottom-full mb-1' : 'top-full mt-1'} w-40 bg-white rounded-xl border border-gray-200 shadow-lg z-20 overflow-hidden py-1`}>
                               <button onClick={() => openDrawer(emp)}
                                 className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
                                 View Profile

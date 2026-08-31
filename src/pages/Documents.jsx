@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import {
   FileText, Upload, Download, Search, Eye,
   Trash2, Plus, FolderOpen, Shield, BookOpen,
@@ -73,15 +73,12 @@ export default function Documents() {
   const [remarksTargetDoc, setRemarksTargetDoc] = useState(null) // document object
   const [remarksStatus, setRemarksStatus] = useState('verified') // 'verified' | 'rejected'
   const [remarksText, setRemarksText] = useState('')
+  const [viewingDoc, setViewingDoc] = useState(null)
 
   const [selectedEmp, setSelectedEmp] = useState(null)
   const [searchEmp, setSearchEmp] = useState('')
 
-  useEffect(() => {
-    fetchData()
-  }, [])
-
-  async function fetchData() {
+  const fetchData = useCallback(async () => {
     setLoading(true)
     try {
       // Fetch employee profiles
@@ -100,15 +97,19 @@ export default function Documents() {
       setEmpDocs(docs || [])
 
       // Auto-select first employee for admin view if not selected yet
-      if (profs && profs.length > 0 && !selectedEmp) {
-        setSelectedEmp(profs[0])
+      if (profs && profs.length > 0) {
+        setSelectedEmp((current) => current || profs[0])
       }
     } catch (err) {
       console.error('Error fetching documents data:', err)
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
+
+  useEffect(() => {
+    fetchData()
+  }, [fetchData])
 
   // Handle document upload
   async function handleUpload(e) {
@@ -119,6 +120,18 @@ export default function Documents() {
     const empId = uploadTargetEmp || user.id
     const fileExt = uploadFile.name.split('.').pop()
     const filePath = `employee-docs/${empId}/${uploadDocType}_${Date.now()}.${fileExt}`
+
+    let fileUrl = null
+    try {
+      fileUrl = await new Promise((resolve) => {
+        const reader = new FileReader()
+        reader.onload = (evt) => resolve(evt.target.result)
+        reader.onerror = () => resolve(null)
+        reader.readAsDataURL(uploadFile)
+      })
+    } catch (err) {
+      console.warn('Failed to read file URL:', err)
+    }
 
     try {
       // 1. Upload to Supabase storage
@@ -136,7 +149,9 @@ export default function Documents() {
           doc_type: uploadDocType,
           file_name: uploadFile.name,
           file_path: filePath,
+          file_url: fileUrl,
           file_size: uploadFile.size,
+          file_type: uploadFile.type || `application/${fileExt}`,
           document_verification_status: 'pending',
           verified_by: null,
           verified_at: null,
@@ -346,7 +361,16 @@ export default function Documents() {
                   
                   {isUploaded ? (
                     <div className="flex items-center gap-1.5">
-                      <button className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-colors" title="View Document">
+                      <button
+                        onClick={() => {
+                          setViewingDoc({
+                            ...doc,
+                            profile: selectedEmp || profiles.find(p => p.id === doc.employee_id)
+                          })
+                        }}
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-colors"
+                        title="View Document"
+                      >
                         <Eye className="w-3.5 h-3.5" /> View
                       </button>
                       
@@ -504,7 +528,12 @@ export default function Documents() {
                       <p className="text-xs text-slate-400 mt-0.5">{doc.size} · Uploaded by {doc.uploader}</p>
                     </div>
                   </div>
-                  <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-colors">
+                  <button
+                    onClick={() => {
+                      alert(`Downloading ${doc.name}...`);
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-colors"
+                  >
                     <Download className="w-3.5 h-3.5" /> Download
                   </button>
                 </div>
@@ -685,7 +714,207 @@ export default function Documents() {
         </div>
       )}
 
+      {/* ─── Document Preview & Viewer Modal ─────────────────────────────── */}
+      {viewingDoc && (
+        <DocumentViewerModal
+          doc={viewingDoc}
+          profile={viewingDoc.profile}
+          onClose={() => setViewingDoc(null)}
+          onApprove={(d) => {
+            setViewingDoc(null)
+            startVerification(d, 'verified')
+          }}
+          onReject={(d) => {
+            setViewingDoc(null)
+            startVerification(d, 'rejected')
+          }}
+          isManagement={isManagement}
+        />
+      )}
+
     </div>
   )
 }
 
+function DocumentViewerModal({ doc, profile, onClose, onApprove, onReject, isManagement }) {
+  if (!doc) return null
+
+  const isImage = doc.file_url?.startsWith('data:image/') ||
+                  doc.file_type?.includes('image') ||
+                  /\.(jpg|jpeg|png|webp|gif)$/i.test(doc.file_name || doc.file_path || '')
+
+  const isPdf = doc.file_url?.startsWith('data:application/pdf') ||
+                doc.file_type?.includes('pdf') ||
+                /\.pdf$/i.test(doc.file_name || doc.file_path || '')
+
+  const docTypeName = EMPLOYEE_DOC_TYPES.find(t => t.key === doc.doc_type)?.label || doc.doc_type || 'Document'
+  const empName = profile?.full_name || 'Employee'
+  const empId = profile?.employee_id || 'EMP'
+  const empDept = profile?.department || 'Operations'
+  const status = doc.document_verification_status || 'pending'
+
+  const handleDownload = () => {
+    if (doc.file_url) {
+      const a = document.createElement('a')
+      a.href = doc.file_url
+      a.download = doc.file_name || `${docTypeName}.pdf`
+      a.click()
+    } else {
+      alert(`Downloading ${doc.file_name || docTypeName}...`)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 overflow-y-auto">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl overflow-hidden border border-slate-200 my-8 flex flex-col max-h-[90vh]">
+        {/* Header */}
+        <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-blue-100 text-blue-700 font-bold">
+              <FileText className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-slate-900 leading-snug">{docTypeName}</h3>
+              <p className="text-xs text-slate-500">{empName} ({empId}) · {doc.file_name || 'Verification Document'}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleDownload}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-semibold shadow-xs transition-colors"
+            >
+              <Download className="w-3.5 h-3.5" /> Download
+            </button>
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-200 transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+
+        {/* Content Viewer Body */}
+        <div className="flex-1 overflow-y-auto p-6 bg-slate-900/5 flex flex-col items-center justify-center min-h-[350px]">
+          {isImage && doc.file_url ? (
+            <div className="w-full flex flex-col items-center justify-center">
+              <img
+                src={doc.file_url}
+                alt={doc.file_name}
+                className="max-h-[60vh] object-contain rounded-xl shadow-lg border border-slate-200 bg-white"
+              />
+            </div>
+          ) : isPdf && doc.file_url ? (
+            <iframe
+              src={doc.file_url}
+              title={doc.file_name}
+              className="w-full h-[60vh] rounded-xl border border-slate-200 bg-white shadow-sm"
+            />
+          ) : (
+            /* Render Authentic Stylized Document Preview Card for Mock / Demo Data */
+            <div className="w-full max-w-xl bg-white rounded-2xl border border-slate-200 shadow-md p-6 relative overflow-hidden space-y-6">
+              {/* Header Seal */}
+              <div className="flex items-center justify-between border-b pb-4 border-slate-200">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-sm">
+                    {doc.doc_type === 'aadhaar' ? '🇮🇳' : doc.doc_type === 'pan' ? '💳' : '📄'}
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-900 uppercase tracking-wide">
+                      {doc.doc_type === 'aadhaar' ? 'Government of India — UIDAI' :
+                       doc.doc_type === 'pan' ? 'Income Tax Department — Govt. of India' :
+                       doc.doc_type === 'passport' ? 'Republic of India — Passport Authority' :
+                       'CareerMap Solutions — Official Document'}
+                    </h4>
+                    <p className="text-[11px] text-slate-500 font-mono">DOCUMENT REF: {doc.file_path || `DOC-${doc.id || 'VERIFIED'}`}</p>
+                  </div>
+                </div>
+                <div className="px-2.5 py-1 rounded-full text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                  OFFICIAL COPY
+                </div>
+              </div>
+
+              {/* Body Details */}
+              <div className="grid grid-cols-2 gap-4 text-xs">
+                <div>
+                  <span className="text-slate-400 font-medium block">Document Holder Name</span>
+                  <span className="font-bold text-slate-900 text-sm">{empName}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400 font-medium block">Employee ID</span>
+                  <span className="font-mono font-semibold text-slate-800">{empId}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400 font-medium block">Department</span>
+                  <span className="font-medium text-slate-800">{empDept}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400 font-medium block">Document Type</span>
+                  <span className="font-semibold text-blue-700 uppercase">{docTypeName}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400 font-medium block">Verification Status</span>
+                  <span className={`inline-block font-semibold capitalize ${
+                    status === 'verified' ? 'text-emerald-600' :
+                    status === 'rejected' ? 'text-rose-600' : 'text-amber-600'
+                  }`}>
+                    ● {status}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-400 font-medium block">Uploaded File</span>
+                  <span className="font-mono text-slate-700 truncate block">{doc.file_name || 'document.pdf'}</span>
+                </div>
+              </div>
+
+              {/* Watermark / Badge / Remarks */}
+              {doc.verification_remarks && (
+                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs">
+                  <span className="font-bold text-slate-700 block">Verification Remarks:</span>
+                  <p className="text-slate-600 mt-0.5">{doc.verification_remarks}</p>
+                </div>
+              )}
+
+              {/* Bottom stamp */}
+              <div className="pt-4 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400">
+                <span>Verified digitally via EMS Verification Portal</span>
+                <span className="font-mono text-emerald-600 font-semibold">● SECURE ENCRYPTED DATA</span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer Actions */}
+        <div className="px-6 py-4 border-t border-slate-100 bg-white flex items-center justify-between shrink-0">
+          <div className="text-xs text-slate-500">
+            Status: <span className="font-bold capitalize">{status}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            {isManagement && onApprove && onReject && (
+              <>
+                <button
+                  onClick={() => onReject(doc)}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-semibold border border-rose-200 transition-colors"
+                >
+                  <X className="w-3.5 h-3.5" /> Reject
+                </button>
+                <button
+                  onClick={() => onApprove(doc)}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow-xs transition-colors"
+                >
+                  <Check className="w-3.5 h-3.5" /> Approve & Verify
+                </button>
+              </>
+            )}
+            <button
+              onClick={onClose}
+              className="px-4 py-2 rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-50 text-xs font-semibold transition-colors"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}

@@ -1,11 +1,13 @@
-import { useState, useMemo } from 'react'
+import { createElement, useState, useMemo } from 'react'
 import {
   IndianRupee, Users, CheckCircle, Clock, TrendingUp,
   Play, Download, Eye, AlertCircle, Search,
+  Landmark, CheckCircle2, XCircle, Edit3, ShieldCheck, FileText
 } from 'lucide-react'
 import PayslipModal from '../features/payroll/PayslipModal'
+import BankVerificationModal from '../features/payroll/BankVerificationModal'
 import { useEmployees } from '../hooks/useEmployees'
-import { usePayrollRuns, useCreatePayrollRun, useUpdatePayrollRun, usePayslips } from '../hooks/usePayroll'
+import { usePayrollRuns, useCreatePayrollRun, useUpdatePayrollRun, usePayslips, useSalaryStructures } from '../hooks/usePayroll'
 import { useAuthStore } from '../stores/authStore'
 
 // ─── Salary computation ───────────────────────────────────────────────────────
@@ -43,7 +45,7 @@ const MONTH_NAMES = ['', 'January', 'February', 'March', 'April', 'May', 'June',
 // ─── Payroll Runs tab ─────────────────────────────────────────────────────────
 
 function RunsTab({ employees }) {
-  const { data: runs = [], isLoading } = usePayrollRuns()
+  const { data: runs = [] } = usePayrollRuns()
   const createRun   = useCreatePayrollRun()
   const updateRun   = useUpdatePayrollRun()
   const { user }    = useAuthStore()
@@ -71,10 +73,48 @@ function RunsTab({ employees }) {
         month: CUR_MONTH, year: CUR_YEAR, status: next,
         total_gross: totalGross, total_net: totalNet, processed_by: user?.id,
         processed_at: new Date().toISOString(),
+        payslips: employees.map((employee) => ({
+          employee_id: employee.id,
+          gross: employee.salary.gross,
+          basic: employee.salary.basic,
+          hra: employee.salary.hra,
+          da: employee.salary.da,
+          special_allowance: employee.salary.special,
+          pf: employee.salary.pf,
+          esi: employee.salary.esi,
+          pt: employee.salary.pt,
+          tds: 0,
+          net: employee.salary.net,
+        })),
       })
     } else {
       await updateRun.mutateAsync({ id: currentRun.id, status: next, processed_by: user?.id, processed_at: new Date().toISOString() })
     }
+  }
+
+  function handleExport() {
+    const headers = ['Employee Name', 'Employee ID', 'Department', 'Designation', 'Annual CTC', 'Gross Monthly', 'Basic', 'HRA', 'Special Allowance', 'PF Deduction', 'ESI Deduction', 'PT Deduction', 'Net Payout']
+    const rows = employees.map((e) => [
+      e.full_name || '',
+      e.employee_id || '',
+      e.department || '',
+      e.designation || '',
+      e.ctc || 0,
+      e.salary?.gross || 0,
+      e.salary?.basic || 0,
+      e.salary?.hra || 0,
+      e.salary?.special || 0,
+      e.salary?.pf || 0,
+      e.salary?.esi || 0,
+      e.salary?.pt || 0,
+      e.salary?.net || 0,
+    ])
+    const lines = [headers.join(','), ...rows.map((r) => r.map((v) => `"${v}"`).join(','))]
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = `payroll_run_${MONTH_NAMES[CUR_MONTH]}_${CUR_YEAR}.csv`
+    a.click()
   }
 
   return (
@@ -110,7 +150,7 @@ function RunsTab({ employees }) {
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <button className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 text-sm font-medium text-gray-700 transition-colors">
+            <button onClick={handleExport} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 text-sm font-medium text-gray-700 transition-colors">
               <Download className="w-4 h-4" /> Export
             </button>
             {nextAction && (
@@ -245,16 +285,44 @@ function SalaryTab({ employees }) {
     return !q || (e.full_name || '').toLowerCase().includes(q) || (e.department || '').toLowerCase().includes(q)
   })
 
+  function handleExportSalary() {
+    const headers = ['Employee Name', 'Department', 'Designation', 'Annual CTC', 'Basic Pay', 'HRA', 'DA', 'Special Allowance', 'Gross Monthly', 'PF', 'ESI', 'PT', 'Net Monthly']
+    const rows = filtered.map((e) => [
+      e.full_name || '',
+      e.department || '',
+      e.designation || '',
+      e.ctc || 0,
+      e.salary?.basic || 0,
+      e.salary?.hra || 0,
+      e.salary?.da || 0,
+      e.salary?.special || 0,
+      e.salary?.gross || 0,
+      e.salary?.pf || 0,
+      e.salary?.esi || 0,
+      e.salary?.pt || 0,
+      e.salary?.net || 0,
+    ])
+    const lines = [headers.join(','), ...rows.map((r) => r.map((v) => `"${v}"`).join(','))]
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = `salary_structures_${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+  }
+
   return (
     <div className="space-y-4">
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm px-4 py-3 flex gap-3 items-center">
-        <div className="relative flex-1">
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm px-4 py-3 flex gap-3 items-center flex-wrap">
+        <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input type="text" placeholder="Search employee or department…" value={search} onChange={(e) => setSearch(e.target.value)}
             className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg text-sm
               focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder:text-gray-400" />
         </div>
         <span className="text-sm text-gray-400 shrink-0">{filtered.length} employees</span>
+        <button onClick={handleExportSalary} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 text-sm font-medium text-gray-700 transition-colors shrink-0">
+          <Download className="w-4 h-4" /> Export
+        </button>
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
@@ -331,6 +399,30 @@ function PayslipsTab({ employees }) {
       }))
     : employees.map((emp) => ({ ...emp, payslipData: null }))
 
+  const handleDownloadAll = () => {
+    const headers = ['Employee Name', 'Employee ID', 'Department', 'Designation', 'Bank Name', 'Account Number', 'IFSC Code', 'Gross Payout', 'PF Deduction', 'ESI Deduction', 'PT Deduction', 'Net Salary']
+    const rows = displayList.map((e) => [
+      e.full_name || '',
+      e.employee_id || '',
+      e.department || '',
+      e.designation || '',
+      e.bank_name || 'Bank Transfer',
+      e.bank_account || '',
+      e.ifsc || '',
+      e.salary?.gross || 0,
+      e.salary?.pf || 0,
+      e.salary?.esi || 0,
+      e.salary?.pt || 0,
+      e.salary?.net || 0,
+    ])
+    const lines = [headers.join(','), ...rows.map((r) => r.map((v) => `"${v}"`).join(','))]
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = `payslips_summary_${runLabel.replace(/\s+/g, '_')}.csv`
+    a.click()
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3">
@@ -347,7 +439,7 @@ function PayslipsTab({ employees }) {
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
         <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
           <p className="text-base font-semibold text-gray-900">Payslips — {runLabel}</p>
-          <button className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 text-sm font-medium text-gray-700 transition-colors">
+          <button onClick={handleDownloadAll} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 text-sm font-medium text-gray-700 transition-colors">
             <Download className="w-4 h-4" /> Download All
           </button>
         </div>
@@ -393,18 +485,274 @@ function PayslipsTab({ employees }) {
   )
 }
 
+// ─── Bank Accounts & Verification tab ────────────────────────────────────────
+
+function BankAccountsTab({ employees }) {
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [selectedProfile, setSelectedProfile] = useState(null)
+  const [bankModalMode, setBankModalMode] = useState('review')
+
+  const verifiedCount = employees.filter((e) => e.bank_verification_status === 'verified').length
+  const pendingCount = employees.filter((e) => e.bank_verification_status === 'pending' || !e.bank_verification_status).length
+  const rejectedCount = employees.filter((e) => e.bank_verification_status === 'rejected').length
+
+  const filtered = employees.filter((emp) => {
+    const q = search.toLowerCase()
+    const matchesQuery = !q ||
+      (emp.full_name || '').toLowerCase().includes(q) ||
+      (emp.employee_id || '').toLowerCase().includes(q) ||
+      (emp.department || '').toLowerCase().includes(q) ||
+      (emp.bank_name || '').toLowerCase().includes(q)
+
+    const empStatus = emp.bank_verification_status || 'pending'
+    const matchesStatus = statusFilter === 'all' || empStatus === statusFilter
+    return matchesQuery && matchesStatus
+  })
+
+  return (
+    <div className="space-y-5">
+      {/* Metrics Row */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
+          <p className="text-xs text-gray-500 font-medium">Total Accounts</p>
+          <p className="text-2xl font-bold text-gray-900 mt-1">{employees.length}</p>
+          <p className="text-[11px] text-gray-400 mt-0.5">Submitted for salary credit</p>
+        </div>
+
+        <div className="bg-emerald-50/60 rounded-xl border border-emerald-200 p-4 shadow-sm">
+          <p className="text-xs text-emerald-800 font-medium flex items-center gap-1">
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Verified Accounts
+          </p>
+          <p className="text-2xl font-bold text-emerald-900 mt-1">{verifiedCount}</p>
+          <p className="text-[11px] text-emerald-700 mt-0.5">Ready for payroll credit</p>
+        </div>
+
+        <div className="bg-amber-50/60 rounded-xl border border-amber-200 p-4 shadow-sm">
+          <p className="text-xs text-amber-800 font-medium flex items-center gap-1">
+            <Clock className="w-3.5 h-3.5 text-amber-600" /> Pending Approvals
+          </p>
+          <p className="text-2xl font-bold text-amber-900 mt-1">{pendingCount}</p>
+          <p className="text-[11px] text-amber-700 mt-0.5">Requires HR/Finance review</p>
+        </div>
+
+        <div className="bg-rose-50/60 rounded-xl border border-rose-200 p-4 shadow-sm">
+          <p className="text-xs text-rose-800 font-medium flex items-center gap-1">
+            <XCircle className="w-3.5 h-3.5 text-rose-600" /> Rejected Details
+          </p>
+          <p className="text-2xl font-bold text-rose-900 mt-1">{rejectedCount}</p>
+          <p className="text-[11px] text-rose-700 mt-0.5">Resubmission pending</p>
+        </div>
+      </div>
+
+      {/* Controls Bar */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 flex flex-col sm:flex-row gap-3 items-center justify-between">
+        <div className="relative w-full sm:w-80">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Search employee, ID, or bank..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 placeholder:text-gray-400"
+          />
+        </div>
+
+        <div className="flex items-center gap-1.5 w-full sm:w-auto overflow-x-auto">
+          {[
+            { id: 'all', label: 'All' },
+            { id: 'pending', label: `Pending (${pendingCount})` },
+            { id: 'verified', label: `Verified (${verifiedCount})` },
+            { id: 'rejected', label: `Rejected (${rejectedCount})` }
+          ].map((f) => (
+            <button
+              key={f.id}
+              onClick={() => setStatusFilter(f.id)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold shrink-0 transition-colors ${
+                statusFilter === f.id
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Bank Accounts Table */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[900px]">
+            <thead>
+              <tr className="bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                <th className="px-5 py-3 text-left">Employee</th>
+                <th className="px-4 py-3 text-left">Bank & Branch</th>
+                <th className="px-4 py-3 text-left">Account Holder & Number</th>
+                <th className="px-4 py-3 text-left">IFSC Code</th>
+                <th className="px-4 py-3 text-left">Proof</th>
+                <th className="px-4 py-3 text-center">Status</th>
+                <th className="px-4 py-3 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="text-center py-16 text-sm text-gray-400">
+                    No bank account records found for this filter.
+                  </td>
+                </tr>
+              ) : (
+                filtered.map((emp) => {
+                  const empStatus = emp.bank_verification_status || 'pending'
+                  return (
+                    <tr key={emp.id} className="hover:bg-gray-50 transition-colors">
+                      <td className="px-5 py-3.5">
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
+                            <span className="text-blue-700 text-xs font-bold">{initials(emp.full_name)}</span>
+                          </div>
+                          <div>
+                            <p className="text-sm font-semibold text-gray-900">{emp.full_name}</p>
+                            <p className="text-xs text-gray-400">{emp.employee_id} · {emp.department}</p>
+                          </div>
+                        </div>
+                      </td>
+
+                      <td className="px-4 py-3.5 text-xs text-gray-700">
+                        <p className="font-semibold text-gray-900">{emp.bank_name || 'N/A'}</p>
+                        <p className="text-gray-400 mt-0.5">{emp.bank_branch || 'Main Branch'}</p>
+                      </td>
+
+                      <td className="px-4 py-3.5 text-xs">
+                        <p className="font-mono font-bold text-gray-900">{emp.bank_account || '—'}</p>
+                        <p className="text-gray-500 text-[11px] mt-0.5">{emp.bank_account_holder_name || emp.full_name} ({emp.bank_account_type || 'Savings'})</p>
+                      </td>
+
+                      <td className="px-4 py-3.5 text-xs font-mono font-semibold text-blue-700 uppercase">
+                        {emp.ifsc || '—'}
+                      </td>
+
+                      <td className="px-4 py-3.5 text-xs">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5 text-slate-600 min-w-0">
+                            <FileText className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                            <span className="font-mono text-[11px] truncate max-w-[120px]">{emp.bank_proof_name || 'cancelled_cheque.pdf'}</span>
+                          </div>
+                          <button
+                            onClick={() => {
+                              setSelectedProfile(emp)
+                              setBankModalMode('review')
+                            }}
+                            className="px-2 py-1 rounded bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold text-[11px] flex items-center gap-1 border border-blue-200 transition-colors shrink-0"
+                            title="View Proof Document"
+                          >
+                            <Eye className="w-3 h-3" /> View
+                          </button>
+                        </div>
+                      </td>
+
+                      <td className="px-4 py-3.5 text-center text-xs">
+                        {empStatus === 'verified' && (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Verified
+                          </span>
+                        )}
+                        {empStatus === 'pending' && (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800">
+                            <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" /> Pending
+                          </span>
+                        )}
+                        {empStatus === 'rejected' && (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-100 text-rose-800">
+                            <XCircle className="w-3.5 h-3.5 text-rose-600" /> Rejected
+                          </span>
+                        )}
+                      </td>
+
+                      <td className="px-4 py-3.5 text-right text-xs">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            onClick={() => {
+                              setSelectedProfile(emp)
+                              setBankModalMode('review')
+                            }}
+                            className="px-2.5 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold transition-colors flex items-center gap-1"
+                          >
+                            <ShieldCheck className="w-3.5 h-3.5" />
+                            {empStatus === 'pending' ? 'Verify' : 'Review'}
+                          </button>
+
+                          <button
+                            onClick={() => {
+                              setSelectedProfile(emp)
+                              setBankModalMode('edit')
+                            }}
+                            className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+                            title="Edit bank details"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <BankVerificationModal
+        open={!!selectedProfile}
+        onClose={() => setSelectedProfile(null)}
+        profile={selectedProfile}
+        mode={bankModalMode}
+      />
+    </div>
+  )
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
-const TABS = ['runs', 'structure', 'payslips']
-const TAB_LABELS = { runs: 'Payroll Runs', structure: 'Salary Structure', payslips: 'Payslips' }
+const TABS = ['runs', 'structure', 'payslips', 'bank_accounts']
+const TAB_LABELS = {
+  runs: 'Payroll Runs',
+  structure: 'Salary Structure',
+  payslips: 'Payslips',
+  bank_accounts: 'Bank Accounts & Verification'
+}
 
 export default function Payroll() {
   const [tab, setTab] = useState('runs')
   const { data: rawEmployees = [] } = useEmployees()
+  const { data: salaryStructures = [] } = useSalaryStructures()
 
   const employees = useMemo(() =>
-    rawEmployees.map((e) => ({ ...e, salary: computeSalary(Number(e.ctc) || 0) })),
-    [rawEmployees]
+    rawEmployees.map((e) => {
+      const ss = salaryStructures.find((s) => s.employee_id === e.id || s.profiles?.id === e.id)
+      const computed = computeSalary(Number(e.ctc || ss?.ctc) || 0)
+      if (ss) {
+        return {
+          ...e,
+          ctc: e.ctc || ss.ctc,
+          salary: {
+            gross: ss.gross ?? computed.gross,
+            basic: ss.basic ?? computed.basic,
+            hra: ss.hra ?? computed.hra,
+            da: ss.da ?? computed.da,
+            special: ss.special_allowance ?? computed.special,
+            pf: ss.pf ?? computed.pf,
+            esi: ss.esi ?? computed.esi,
+            pt: ss.pt ?? computed.pt,
+            net: ss.net_salary ?? computed.net
+          }
+        }
+      }
+      return { ...e, salary: computed }
+    }),
+    [rawEmployees, salaryStructures]
   )
 
   const totalMonthly = employees.reduce((s, e) => s + e.salary.gross, 0)
@@ -427,9 +775,9 @@ export default function Payroll() {
           { label: 'Monthly Net Pay', value: fmt(totalNet),     icon: TrendingUp,  bg: 'bg-green-100',  ic: 'text-green-600',  sub: 'After deductions' },
           { label: 'Avg Net Salary',  value: fmt(avgSalary),    icon: Users,       bg: 'bg-purple-100', ic: 'text-purple-600', sub: 'Per employee' },
           { label: 'Payroll Status',  value: 'Draft',           icon: Clock,       bg: 'bg-amber-100',  ic: 'text-amber-600',  sub: `${MONTH_NAMES[CUR_MONTH]} ${CUR_YEAR}` },
-        ].map(({ label, value, icon: Icon, bg, ic, sub }) => (
+        ].map(({ label, value, icon, bg, ic, sub }) => (
           <div key={label} className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 flex items-center gap-4">
-            <div className={`${bg} rounded-xl p-3 shrink-0`}><Icon className={`w-6 h-6 ${ic}`} /></div>
+            <div className={`${bg} rounded-xl p-3 shrink-0`}>{createElement(icon, { className: `w-6 h-6 ${ic}` })}</div>
             <div>
               <p className="text-xl font-bold text-gray-900">{value}</p>
               <p className="text-sm text-gray-500">{label}</p>
@@ -449,9 +797,10 @@ export default function Payroll() {
         ))}
       </div>
 
-      {tab === 'runs'      && <RunsTab employees={employees} />}
-      {tab === 'structure' && <SalaryTab employees={employees} />}
-      {tab === 'payslips'  && <PayslipsTab employees={employees} />}
+      {tab === 'runs'          && <RunsTab employees={employees} />}
+      {tab === 'structure'     && <SalaryTab employees={employees} />}
+      {tab === 'payslips'      && <PayslipsTab employees={employees} />}
+      {tab === 'bank_accounts' && <BankAccountsTab employees={employees} />}
     </div>
   )
 }

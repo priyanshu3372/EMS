@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { Bell, Menu, ChevronDown, User } from 'lucide-react'
 import { useAuthStore } from '../stores/authStore'
+import { useNotifications } from '../hooks/useNotifications'
+import NotificationPanel from './NotificationPanel'
 
 const ROLE_LABELS = {
   super_admin: 'Super Admin',
@@ -11,8 +13,11 @@ const ROLE_LABELS = {
 }
 
 export default function TopBar({ title, onMenuClick }) {
-  const { user, profile, role } = useAuthStore()
+  const { user, profile, role, setProfileDrawerOpen } = useAuthStore()
   const [dropdownOpen, setDropdownOpen] = useState(false)
+  const [notificationOpen, setNotificationOpen] = useState(false)
+
+  const { unreadCount } = useNotifications(user?.id)
 
   const displayName = profile?.full_name || user?.email?.split('@')[0] || 'User'
   const displayEmail = user?.email ?? ''
@@ -41,12 +46,27 @@ export default function TopBar({ title, onMenuClick }) {
 
       <div className="flex items-center gap-3">
 
-        {/* Notification bell */}
-        <button className="relative p-2 rounded-lg text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-colors">
-          <Bell className="w-5 h-5" />
-          {/* Unread dot */}
-          <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full" />
-        </button>
+        {/* Notification bell & Dropdown Container */}
+        <div className="relative">
+          <button
+            onClick={() => setNotificationOpen(!notificationOpen)}
+            className="relative p-2 rounded-lg text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+            title="Notifications"
+          >
+            <Bell className="w-5 h-5" />
+            {/* Dynamic Unread Badge */}
+            {unreadCount > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 min-w-4 h-4 px-1 flex items-center justify-center bg-red-500 text-white text-[10px] font-bold rounded-full border-2 border-white">
+                {unreadCount > 9 ? '9+' : unreadCount}
+              </span>
+            )}
+          </button>
+
+          <NotificationPanel
+            isOpen={notificationOpen}
+            onClose={() => setNotificationOpen(false)}
+          />
+        </div>
 
         {/* User menu */}
         <div className="relative">
@@ -74,7 +94,13 @@ export default function TopBar({ title, onMenuClick }) {
                   <p className="text-xs text-gray-500 mt-0.5">{displayRole}</p>
                 </div>
                 <div className="p-1">
-                  <button className="flex items-center gap-2 w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg transition-colors">
+                  <button
+                    onClick={() => {
+                      setDropdownOpen(false)
+                      setProfileDrawerOpen(true)
+                    }}
+                    className="flex items-center gap-2 w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg transition-colors"
+                  >
                     <User className="w-4 h-4 text-gray-400" />
                     My Profile
                   </button>

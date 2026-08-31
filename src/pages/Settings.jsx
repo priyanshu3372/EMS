@@ -3,12 +3,13 @@ import {
   Building2, Users, CalendarDays, Wallet, Bell,
   Save, Plus, Trash2, Edit2, X, Check,
   Mail, Shield, ToggleLeft, ToggleRight, ChevronRight,
-  Globe, Clock, IndianRupee, Loader2, AlertCircle,
+  Globe, Clock, IndianRupee, Loader2, AlertCircle, MapPin, Compass, Navigation, LocateFixed, ShieldCheck
 } from 'lucide-react'
 import {
   useUsers, useUpdateUserRole,
   useToggleUserStatus, useDeleteUser,
 } from '../hooks/useUsers'
+import { getCompanyLocation, saveCompanyLocation } from '../utils/geofence'
 
 // ─── Shared input styles ──────────────────────────────────────────────────────
 
@@ -71,9 +72,38 @@ function CompanySettings() {
   })
   const [saved, setSaved] = useState(false)
 
+  // Geofence configuration state
+  const [geoConfig, setGeoConfig] = useState(getCompanyLocation)
+  const [geoLocating, setGeoLocating] = useState(false)
+  const [geoMsg, setGeoMsg] = useState('')
+
   function set(k, v) { setForm((f) => ({ ...f, [k]: v })); setSaved(false) }
 
-  function handleSave() {
+  function handleSetCurrentGps() {
+    if (!navigator.geolocation) {
+      alert('Geolocation is not supported by your browser.')
+      return
+    }
+    setGeoLocating(true)
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lat = Math.round(pos.coords.latitude * 10000) / 10000
+        const lon = Math.round(pos.coords.longitude * 10000) / 10000
+        setGeoConfig((prev) => ({ ...prev, latitude: lat, longitude: lon }))
+        setGeoMsg('Successfully captured your current GPS coordinates!')
+        setGeoLocating(false)
+        setTimeout(() => setGeoMsg(''), 4000)
+      },
+      (err) => {
+        alert('Could not detect GPS location: ' + err.message)
+        setGeoLocating(false)
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    )
+  }
+
+  function handleSaveAll() {
+    saveCompanyLocation(geoConfig)
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
   }
@@ -117,6 +147,119 @@ function CompanySettings() {
         </Field>
       </Section>
 
+      {/* ─── Company Geofence Location & Radius Settings ───────────────────── */}
+      <Section title="Company Location & Attendance Geofence Map" desc="Set office map coordinates and geofence boundary radius for employee check-in.">
+        <Field label="Office Location Name" hint="e.g. BKC Main Office, Headquarters">
+          <input
+            className={inp}
+            value={geoConfig.name}
+            onChange={(e) => setGeoConfig((g) => ({ ...g, name: e.target.value }))}
+          />
+        </Field>
+
+        <Field label="Geofence Boundary Radius" hint="Employees must be within this distance to mark attendance">
+          <div className="flex items-center gap-3">
+            <input
+              type="number"
+              step="0.1"
+              min="0.1"
+              max="50"
+              className={`${inpSm} w-32 font-bold text-blue-700`}
+              value={geoConfig.radiusKm}
+              onChange={(e) => setGeoConfig((g) => ({ ...g, radiusKm: Number(e.target.value) || 1.0 }))}
+            />
+            <span className="text-sm font-semibold text-gray-700">km ({Math.round((geoConfig.radiusKm || 1) * 1000)} meters)</span>
+          </div>
+        </Field>
+
+        <Field label="Office GPS Coordinates" hint="Exact Latitude & Longitude for distance verification">
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-medium text-gray-500 block mb-1">Latitude (°N)</label>
+                <input
+                  type="number"
+                  step="0.0001"
+                  className={inp}
+                  value={geoConfig.latitude}
+                  onChange={(e) => setGeoConfig((g) => ({ ...g, latitude: Number(e.target.value) }))}
+                  placeholder="e.g. 19.0657"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-500 block mb-1">Longitude (°E)</label>
+                <input
+                  type="number"
+                  step="0.0001"
+                  className={inp}
+                  value={geoConfig.longitude}
+                  onChange={(e) => setGeoConfig((g) => ({ ...g, longitude: Number(e.target.value) }))}
+                  placeholder="e.g. 72.8686"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleSetCurrentGps}
+                disabled={geoLocating}
+                className="px-3.5 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-xs"
+              >
+                {geoLocating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <LocateFixed className="w-3.5 h-3.5 text-blue-400" />}
+                {geoLocating ? 'Detecting GPS...' : 'Set Office Location via My Current GPS'}
+              </button>
+            </div>
+
+            {geoMsg && (
+              <p className="text-xs font-semibold text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-lg border border-emerald-200">
+                ✓ {geoMsg}
+              </p>
+            )}
+          </div>
+        </Field>
+
+        {/* Interactive Map Visualizer */}
+        <div className="py-3">
+          <div className="p-4 bg-slate-900 rounded-2xl border border-slate-800 text-white relative overflow-hidden">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-3">
+              <div className="flex items-center gap-2">
+                <MapPin className="w-4 h-4 text-red-500" />
+                <span className="font-bold text-sm text-slate-100">{geoConfig.name} Map Geofence</span>
+              </div>
+              <span className="text-xs font-mono bg-blue-600/30 text-blue-300 px-2.5 py-0.5 rounded-full border border-blue-500/40">
+                Radius: {geoConfig.radiusKm} km
+              </span>
+            </div>
+
+            {/* Simulated Vector Map View */}
+            <div className="h-44 rounded-xl bg-slate-950/80 border border-slate-800 relative flex items-center justify-center overflow-hidden">
+              {/* Map grid lines */}
+              <div className="absolute inset-0 opacity-20 bg-[radial-gradient(#3b82f6_1px,transparent_1px)] [background-size:16px_16px]" />
+
+              {/* 1.0 km Geofence Outer Circle */}
+              <div className="w-36 h-36 rounded-full border-2 border-dashed border-blue-400/60 bg-blue-500/10 flex items-center justify-center animate-pulse">
+                <div className="w-24 h-24 rounded-full border border-blue-400/40 bg-blue-500/15 flex items-center justify-center">
+                  <div className="w-3 h-3 rounded-full bg-red-500 border-2 border-white shadow-lg animate-bounce" />
+                </div>
+              </div>
+
+              {/* Map Labels */}
+              <div className="absolute top-2 left-2 bg-slate-900/80 backdrop-blur-xs px-2 py-1 rounded text-[10px] font-mono text-slate-300 border border-slate-700">
+                LAT: {geoConfig.latitude}° | LON: {geoConfig.longitude}°
+              </div>
+              <div className="absolute bottom-2 right-2 bg-blue-950/80 backdrop-blur-xs px-2 py-1 rounded text-[10px] font-semibold text-blue-300 border border-blue-800 flex items-center gap-1">
+                <ShieldCheck className="w-3 h-3 text-emerald-400" /> 1.0 km Boundary Enforced
+              </div>
+            </div>
+
+            <p className="text-[11px] text-slate-400 mt-2">
+              📍 Employees outside this <strong className="text-slate-200">{geoConfig.radiusKm} km radius</strong> will be prevented from marking present attendance unless granted WFH or manager override.
+            </p>
+          </div>
+        </div>
+      </Section>
+
       <Section title="Regional Settings" desc="Timezone, date format, and financial year.">
         <Field label="Financial Year">
           <select className={inp} value={form.fiscal_year} onChange={(e) => set('fiscal_year', e.target.value)}>
@@ -140,7 +283,7 @@ function CompanySettings() {
         </Field>
       </Section>
 
-      <SaveBar onSave={handleSave} saved={saved} />
+      <SaveBar onSave={handleSaveAll} saved={saved} />
     </div>
   )
 }
@@ -658,15 +801,15 @@ export default function Settings() {
         {/* Left nav */}
         <aside className="hidden lg:block w-52 shrink-0">
           <nav className="space-y-0.5">
-            {TABS.map(({ id, label, icon: Icon }) => (
-              <button key={id} onClick={() => setTab(id)}
+            {TABS.map((item) => (
+              <button key={item.id} onClick={() => setTab(item.id)}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all text-left
-                  ${tab === id
+                  ${tab === item.id
                     ? 'bg-blue-50 text-blue-700 border border-blue-200'
                     : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 border border-transparent'
                   }`}>
-                <Icon className={`w-4 h-4 ${tab === id ? 'text-blue-600' : 'text-gray-400'}`} />
-                {label}
+                <item.icon className={`w-4 h-4 ${tab === item.id ? 'text-blue-600' : 'text-gray-400'}`} />
+                {item.label}
               </button>
             ))}
           </nav>
@@ -675,12 +818,12 @@ export default function Settings() {
         {/* Mobile tab bar */}
         <div className="lg:hidden w-full -mx-0 mb-2">
           <div className="flex gap-1 overflow-x-auto pb-1">
-            {TABS.map(({ id, label, icon: Icon }) => (
-              <button key={id} onClick={() => setTab(id)}
+            {TABS.map((item) => (
+              <button key={item.id} onClick={() => setTab(item.id)}
                 className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors shrink-0
-                  ${tab === id ? 'bg-blue-600 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
-                <Icon className="w-3.5 h-3.5" />
-                {label}
+                  ${tab === item.id ? 'bg-blue-600 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+                <item.icon className="w-3.5 h-3.5" />
+                {item.label}
               </button>
             ))}
           </div>

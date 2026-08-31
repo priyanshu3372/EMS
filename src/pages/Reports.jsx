@@ -117,9 +117,28 @@ function pctBar(val, max = 100) {
 function ReportPanel({ report, onClose }) {
   const [search, setSearch] = useState('')
   const [month, setMonth] = useState('March 2026')
-  const { data, isLoading } = useReportsData(month)
+  const [selectedDept, setSelectedDept] = useState('all')
+  const [selectedEmpId, setSelectedEmpId] = useState('all')
+  const { data, isLoading } = useReportsData(month, selectedDept, selectedEmpId)
 
   if (!report) return null
+
+  const monthOptions = ['March 2026', 'February 2026', 'January 2026', 'December 2025', 'November 2025', 'October 2025']
+
+  function filterBySearch(items) {
+    if (!search.trim()) return items || []
+    const q = search.toLowerCase().trim()
+    return (items || []).filter((r) => {
+      const name = (r.name || '').toLowerCase()
+      const id = (r.id || '').toLowerCase()
+      const dept = (r.dept || '').toLowerCase()
+      return name.includes(q) || id.includes(q) || dept.includes(q)
+    })
+  }
+
+  function handlePrint() {
+    window.print()
+  }
 
   function renderContent() {
     if (isLoading) {
@@ -135,8 +154,15 @@ function ReportPanel({ report, onClose }) {
     switch (report.id) {
 
       case 'attendance_monthly': {
-        const rows = (data.attendanceSummary || []).filter((r) =>
-          !search || r.name.toLowerCase().includes(search.toLowerCase()))
+        const rows = filterBySearch(data.attendanceSummary || [])
+        if (rows.length === 0) {
+          return (
+            <div className="flex flex-col items-center justify-center py-16 text-gray-400 text-sm">
+              <Search className="w-8 h-8 mb-2 text-gray-300" />
+              <p>No data available for the selected filters.</p>
+            </div>
+          )
+        }
         return (
           <>
             <div className="overflow-x-auto">
@@ -150,7 +176,7 @@ function ReportPanel({ report, onClose }) {
                 </thead>
                 <tbody>
                   {rows.map((r) => (
-                    <tr key={r.id} className="border-b border-gray-100 hover:bg-gray-50">
+                    <tr key={r.rawId || r.id} className="border-b border-gray-100 hover:bg-gray-50">
                       <td className="px-4 py-3">
                         <p className="text-sm font-medium text-gray-900">{r.name}</p>
                         <p className="text-xs text-gray-400 font-mono">{r.id}</p>
@@ -166,13 +192,19 @@ function ReportPanel({ report, onClose }) {
                 </tbody>
               </table>
             </div>
-            <div className="px-4 py-3 border-t border-gray-100 flex justify-end">
-              <button onClick={() => exportCSV(`attendance_${month.toLowerCase().replace(' ', '_')}.csv`,
-                ['Name', 'ID', 'Department', 'Present', 'Absent', 'Late', 'WFH', 'Attendance %'],
-                rows.map((r) => [r.name, r.id, r.dept, r.present, r.absent, r.late, r.wfh, r.pct + '%'])
-              )} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition-colors">
-                <Download className="w-4 h-4" /> Export CSV
-              </button>
+            <div className="px-4 py-3 border-t border-gray-100 flex items-center justify-between gap-3">
+              <p className="text-xs text-gray-400">Showing {rows.length} employee records</p>
+              <div className="flex items-center gap-2">
+                <button onClick={handlePrint} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 text-gray-700 text-xs font-medium transition-colors">
+                  <FileText className="w-3.5 h-3.5" /> Print / PDF
+                </button>
+                <button onClick={() => exportCSV(`attendance_${month.toLowerCase().replace(' ', '_')}.csv`,
+                  ['Name', 'ID', 'Department', 'Present', 'Absent', 'Late', 'WFH', 'Attendance %'],
+                  rows.map((r) => [r.name, r.id, r.dept, r.present, r.absent, r.late, r.wfh, r.pct + '%'])
+                )} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium transition-colors">
+                  <Download className="w-3.5 h-3.5" /> Export CSV
+                </button>
+              </div>
             </div>
           </>
         )
@@ -181,17 +213,32 @@ function ReportPanel({ report, onClose }) {
       case 'attendance_dept': {
         const deptMap = {}
         ;(data.attendanceSummary || []).forEach((r) => {
-          if (!deptMap[r.dept]) deptMap[r.dept] = { dept: r.dept, present: 0, absent: 0, late: 0, total: 0, count: 0 }
+          if (!deptMap[r.dept]) deptMap[r.dept] = { dept: r.dept, present: 0, absent: 0, late: 0, wfh: 0, total: 0, count: 0 }
           deptMap[r.dept].present += r.present
           deptMap[r.dept].absent  += r.absent
           deptMap[r.dept].late    += r.late
-          deptMap[r.dept].total   += r.total
+          deptMap[r.dept].wfh     += r.wfh
+          deptMap[r.dept].total   += (r.present + r.wfh + r.late + r.absent)
           deptMap[r.dept].count++
         })
-        const rows = Object.values(deptMap).map((d) => ({
+        let rows = Object.values(deptMap).map((d) => ({
           ...d,
-          pct: d.total > 0 ? Math.round(d.present / d.total * 100) : 100,
+          pct: d.total > 0 ? Math.round((d.present + d.wfh + d.late) / d.total * 100) : 100,
         }))
+        if (search.trim()) {
+          const q = search.toLowerCase().trim()
+          rows = rows.filter(r => r.dept.toLowerCase().includes(q))
+        }
+
+        if (rows.length === 0) {
+          return (
+            <div className="flex flex-col items-center justify-center py-16 text-gray-400 text-sm">
+              <Search className="w-8 h-8 mb-2 text-gray-300" />
+              <p>No data available for the selected filters.</p>
+            </div>
+          )
+        }
+
         return (
           <>
             <ResponsiveContainer width="100%" height={200}>
@@ -226,21 +273,34 @@ function ReportPanel({ report, onClose }) {
                 </tbody>
               </table>
             </div>
-            <div className="px-4 py-3 border-t border-gray-100 flex justify-end">
-              <button onClick={() => exportCSV(`dept_attendance_${month.toLowerCase().replace(' ', '_')}.csv`,
-                ['Department', 'Employees', 'Present', 'Absent', 'Late', 'Attendance %'],
-                rows.map((r) => [r.dept, r.count, r.present, r.absent, r.late, r.pct + '%'])
-              )} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition-colors">
-                <Download className="w-4 h-4" /> Export CSV
-              </button>
+            <div className="px-4 py-3 border-t border-gray-100 flex items-center justify-between gap-3">
+              <p className="text-xs text-gray-400">Showing {rows.length} departments</p>
+              <div className="flex items-center gap-2">
+                <button onClick={handlePrint} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 text-gray-700 text-xs font-medium transition-colors">
+                  <FileText className="w-3.5 h-3.5" /> Print / PDF
+                </button>
+                <button onClick={() => exportCSV(`dept_attendance_${month.toLowerCase().replace(' ', '_')}.csv`,
+                  ['Department', 'Employees', 'Present', 'Absent', 'Late', 'Attendance %'],
+                  rows.map((r) => [r.dept, r.count, r.present, r.absent, r.late, r.pct + '%'])
+                )} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium transition-colors">
+                  <Download className="w-3.5 h-3.5" /> Export CSV
+                </button>
+              </div>
             </div>
           </>
         )
       }
 
       case 'leave_summary': {
-        const rows = (data.leaveSummary || []).filter((r) =>
-          !search || r.name.toLowerCase().includes(search.toLowerCase()))
+        const rows = filterBySearch(data.leaveSummary || [])
+        if (rows.length === 0) {
+          return (
+            <div className="flex flex-col items-center justify-center py-16 text-gray-400 text-sm">
+              <Search className="w-8 h-8 mb-2 text-gray-300" />
+              <p>No data available for the selected filters.</p>
+            </div>
+          )
+        }
         return (
           <>
             <div className="overflow-x-auto">
@@ -254,7 +314,7 @@ function ReportPanel({ report, onClose }) {
                 </thead>
                 <tbody>
                   {rows.map((r) => (
-                    <tr key={r.id} className="border-b border-gray-100 hover:bg-gray-50">
+                    <tr key={r.rawId || r.id} className="border-b border-gray-100 hover:bg-gray-50">
                       <td className="px-4 py-3">
                         <p className="text-sm font-medium text-gray-900">{r.name}</p>
                         <p className="text-xs text-gray-400 font-mono">{r.id}</p>
@@ -270,20 +330,34 @@ function ReportPanel({ report, onClose }) {
                 </tbody>
               </table>
             </div>
-            <div className="px-4 py-3 border-t border-gray-100 flex justify-end">
-              <button onClick={() => exportCSV(`leave_summary_${month.toLowerCase().replace(' ', '_')}.csv`,
-                ['Name', 'ID', 'Department', 'Casual', 'Sick', 'Earned', 'WFH', 'Total'],
-                rows.map((r) => [r.name, r.id, r.dept, r.casual, r.sick, r.earned, r.wfh, r.total])
-              )} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition-colors">
-                <Download className="w-4 h-4" /> Export CSV
-              </button>
+            <div className="px-4 py-3 border-t border-gray-100 flex items-center justify-between gap-3">
+              <p className="text-xs text-gray-400">Showing {rows.length} employee records</p>
+              <div className="flex items-center gap-2">
+                <button onClick={handlePrint} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 text-gray-700 text-xs font-medium transition-colors">
+                  <FileText className="w-3.5 h-3.5" /> Print / PDF
+                </button>
+                <button onClick={() => exportCSV(`leave_summary_${month.toLowerCase().replace(' ', '_')}.csv`,
+                  ['Name', 'ID', 'Department', 'Casual', 'Sick', 'Earned', 'WFH', 'Total'],
+                  rows.map((r) => [r.name, r.id, r.dept, r.casual, r.sick, r.earned, r.wfh, r.total])
+                )} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium transition-colors">
+                  <Download className="w-3.5 h-3.5" /> Export CSV
+                </button>
+              </div>
             </div>
           </>
         )
       }
 
       case 'leave_balance': {
-        const rows = data.leaveBalancesReport || []
+        const rows = filterBySearch(data.leaveBalancesReport || [])
+        if (rows.length === 0) {
+          return (
+            <div className="flex flex-col items-center justify-center py-16 text-gray-400 text-sm">
+              <Search className="w-8 h-8 mb-2 text-gray-300" />
+              <p>No data available for the selected filters.</p>
+            </div>
+          )
+        }
         return (
           <>
             <div className="overflow-x-auto">
@@ -297,7 +371,7 @@ function ReportPanel({ report, onClose }) {
                 </thead>
                 <tbody>
                   {rows.map((r) => (
-                    <tr key={r.id} className="border-b border-gray-100 hover:bg-gray-50">
+                    <tr key={r.rawId || r.id} className="border-b border-gray-100 hover:bg-gray-50">
                       <td className="px-4 py-3">
                         <p className="text-sm font-medium text-gray-900">{r.name}</p>
                         <p className="text-xs text-gray-400 font-mono">{r.id}</p>
@@ -318,23 +392,38 @@ function ReportPanel({ report, onClose }) {
                 </tbody>
               </table>
             </div>
-            <div className="px-4 py-3 border-t border-gray-100 flex justify-end">
-              <button onClick={() => exportCSV(`leave_balance_${month.toLowerCase().replace(' ', '_')}.csv`,
-                ['Name', 'ID', 'Department', 'Casual Bal', 'Sick Bal', 'Earned Bal', 'WFH Bal'],
-                rows.map((r) => [r.name, r.id, r.dept, r.casual_bal, r.sick_bal, r.earned_bal, r.wfh_bal])
-              )} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition-colors">
-                <Download className="w-4 h-4" /> Export CSV
-              </button>
+            <div className="px-4 py-3 border-t border-gray-100 flex items-center justify-between gap-3">
+              <p className="text-xs text-gray-400">Showing {rows.length} employee records</p>
+              <div className="flex items-center gap-2">
+                <button onClick={handlePrint} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 text-gray-700 text-xs font-medium transition-colors">
+                  <FileText className="w-3.5 h-3.5" /> Print / PDF
+                </button>
+                <button onClick={() => exportCSV(`leave_balance_${month.toLowerCase().replace(' ', '_')}.csv`,
+                  ['Name', 'ID', 'Department', 'Casual Bal', 'Sick Bal', 'Earned Bal', 'WFH Bal'],
+                  rows.map((r) => [r.name, r.id, r.dept, r.casual_bal, r.sick_bal, r.earned_bal, r.wfh_bal])
+                )} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium transition-colors">
+                  <Download className="w-3.5 h-3.5" /> Export CSV
+                </button>
+              </div>
             </div>
           </>
         )
       }
 
       case 'payroll_monthly': {
-        const rows = (data.payrollSummary || []).filter((r) =>
-          !search || r.name.toLowerCase().includes(search.toLowerCase()))
+        const rows = filterBySearch(data.payrollSummary || [])
         const totGross = rows.reduce((s, r) => s + r.gross, 0)
         const totNet   = rows.reduce((s, r) => s + r.net, 0)
+
+        if (rows.length === 0) {
+          return (
+            <div className="flex flex-col items-center justify-center py-16 text-gray-400 text-sm">
+              <Search className="w-8 h-8 mb-2 text-gray-300" />
+              <p>No data available for the selected filters.</p>
+            </div>
+          )
+        }
+
         return (
           <>
             {/* Trend chart */}
@@ -361,7 +450,7 @@ function ReportPanel({ report, onClose }) {
                 </thead>
                 <tbody>
                   {rows.map((r) => (
-                    <tr key={r.id} className="border-b border-gray-100 hover:bg-gray-50">
+                    <tr key={r.rawId || r.id} className="border-b border-gray-100 hover:bg-gray-50">
                       <td className="px-4 py-3">
                         <p className="text-sm font-medium text-gray-900">{r.name}</p>
                         <p className="text-xs text-gray-400 font-mono">{r.id}</p>
@@ -375,7 +464,7 @@ function ReportPanel({ report, onClose }) {
                     </tr>
                   ))}
                   <tr className="bg-gray-50 border-t-2 border-gray-200 font-semibold">
-                    <td colSpan={2} className="px-4 py-3 text-sm text-gray-900">Total</td>
+                    <td colSpan={2} className="px-4 py-3 text-sm text-gray-900">Total ({rows.length})</td>
                     <td className="px-4 py-3 text-sm text-gray-900">{fmt(totGross)}</td>
                     <td colSpan={3} />
                     <td className="px-4 py-3 text-sm text-green-700">{fmt(totNet)}</td>
@@ -383,29 +472,45 @@ function ReportPanel({ report, onClose }) {
                 </tbody>
               </table>
             </div>
-            <div className="px-4 py-3 border-t border-gray-100 flex justify-end">
-              <button onClick={() => exportCSV(`payroll_${month.toLowerCase().replace(' ', '_')}.csv`,
-                ['Name', 'ID', 'Department', 'Gross', 'PF', 'ESI', 'PT', 'Net'],
-                rows.map((r) => [r.name, r.id, r.dept, r.gross, r.pf, r.esi, r.pt, r.net])
-              )} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition-colors">
-                <Download className="w-4 h-4" /> Export CSV
-              </button>
+            <div className="px-4 py-3 border-t border-gray-100 flex items-center justify-between gap-3">
+              <p className="text-xs text-gray-400">Showing {rows.length} employee records</p>
+              <div className="flex items-center gap-2">
+                <button onClick={handlePrint} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 text-gray-700 text-xs font-medium transition-colors">
+                  <FileText className="w-3.5 h-3.5" /> Print / PDF
+                </button>
+                <button onClick={() => exportCSV(`payroll_${month.toLowerCase().replace(' ', '_')}.csv`,
+                  ['Name', 'ID', 'Department', 'Gross', 'PF', 'ESI', 'PT', 'Net'],
+                  rows.map((r) => [r.name, r.id, r.dept, r.gross, r.pf, r.esi, r.pt, r.net])
+                )} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium transition-colors">
+                  <Download className="w-3.5 h-3.5" /> Export CSV
+                </button>
+              </div>
             </div>
           </>
         )
       }
 
       case 'payroll_pf': {
-        const rows = data.payrollSummary || []
+        const rows = filterBySearch(data.payrollSummary || [])
         const totPF  = rows.reduce((s, r) => s + r.pf, 0)
         const totESI = rows.reduce((s, r) => s + r.esi, 0)
+
+        if (rows.length === 0) {
+          return (
+            <div className="flex flex-col items-center justify-center py-16 text-gray-400 text-sm">
+              <Search className="w-8 h-8 mb-2 text-gray-300" />
+              <p>No data available for the selected filters.</p>
+            </div>
+          )
+        }
+
         return (
           <>
             <div className="grid grid-cols-3 gap-4 mb-4">
               {[
-                { label: 'Total Employee PF',  value: fmt(totPF),                   sub: '12% of Basic' },
-                { label: 'Total Employer PF',  value: fmt(Math.round(totPF)),        sub: '12% (Employer share)' },
-                { label: 'Total ESI',          value: fmt(totESI),                  sub: '0.75% of Gross' },
+                { label: 'Total Employee PF',  value: fmt(totPF),            sub: '12% of Basic' },
+                { label: 'Total Employer PF',  value: fmt(Math.round(totPF)), sub: '12% (Employer share)' },
+                { label: 'Total ESI',          value: fmt(totESI),           sub: '0.75% of Gross' },
               ].map((c) => (
                 <div key={c.label} className="bg-gray-50 rounded-xl p-4 border border-gray-200">
                   <p className="text-xl font-bold text-gray-900">{c.value}</p>
@@ -424,14 +529,14 @@ function ReportPanel({ report, onClose }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((r, i) => (
-                    <tr key={r.id} className="border-b border-gray-100 hover:bg-gray-50">
+                  {rows.map((r) => (
+                    <tr key={r.rawId || r.id} className="border-b border-gray-100 hover:bg-gray-50">
                       <td className="px-4 py-3">
                         <p className="text-sm font-medium text-gray-900">{r.name}</p>
                         <p className="text-xs text-gray-400 font-mono">{r.id}</p>
                       </td>
-                      <td className="px-4 py-3 text-xs text-gray-500 font-mono">MH/BOM/{String(12340 + i).padStart(5,'0')}/001</td>
-                      <td className="px-4 py-3 text-sm text-gray-700">{fmt(Math.round(r.gross * 0.40))}</td>
+                      <td className="px-4 py-3 text-xs text-gray-500 font-mono">{r.pf_acc_no}</td>
+                      <td className="px-4 py-3 text-sm text-gray-700">{fmt(r.basic)}</td>
                       <td className="px-4 py-3 text-sm font-medium text-blue-600">{fmt(r.pf)}</td>
                       <td className="px-4 py-3 text-sm font-medium text-blue-600">{fmt(r.pf)}</td>
                       <td className="px-4 py-3 text-sm font-medium text-purple-600">{r.esi > 0 ? fmt(r.esi) : <span className="text-gray-300">—</span>}</td>
@@ -440,33 +545,50 @@ function ReportPanel({ report, onClose }) {
                 </tbody>
               </table>
             </div>
-            <div className="px-4 py-3 border-t border-gray-100 flex justify-end">
-              <button onClick={() => exportCSV(`pf_esi_${month.toLowerCase().replace(' ', '_')}.csv`,
-                ['Name', 'ID', 'Basic', 'Emp PF', 'Employer PF', 'ESI'],
-                rows.map((r) => [r.name, r.id, Math.round(r.gross * 0.40), r.pf, r.pf, r.esi])
-              )} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition-colors">
-                <Download className="w-4 h-4" /> Export CSV
-              </button>
+            <div className="px-4 py-3 border-t border-gray-100 flex items-center justify-between gap-3">
+              <p className="text-xs text-gray-400">Showing {rows.length} employee records</p>
+              <div className="flex items-center gap-2">
+                <button onClick={handlePrint} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 text-gray-700 text-xs font-medium transition-colors">
+                  <FileText className="w-3.5 h-3.5" /> Print / PDF
+                </button>
+                <button onClick={() => exportCSV(`pf_esi_${month.toLowerCase().replace(' ', '_')}.csv`,
+                  ['Name', 'ID', 'PF Account No', 'Basic', 'Emp PF', 'Employer PF', 'ESI'],
+                  rows.map((r) => [r.name, r.id, r.pf_acc_no, r.basic, r.pf, r.pf, r.esi])
+                )} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium transition-colors">
+                  <Download className="w-3.5 h-3.5" /> Export CSV
+                </button>
+              </div>
             </div>
           </>
         )
       }
 
       case 'employee_headcount': {
-        const total = (data.headcountByDept || []).reduce((s, d) => s + d.value, 0)
+        const headcountData = filterBySearch(data.headcountByDept || [])
+        const total = headcountData.reduce((s, d) => s + d.value, 0)
+
+        if (headcountData.length === 0) {
+          return (
+            <div className="flex flex-col items-center justify-center py-16 text-gray-400 text-sm">
+              <Search className="w-8 h-8 mb-2 text-gray-300" />
+              <p>No data available for the selected filters.</p>
+            </div>
+          )
+        }
+
         return (
           <>
             <div className="grid grid-cols-2 gap-6 mb-4">
               <ResponsiveContainer width="100%" height={200}>
                 <PieChart>
-                  <Pie data={data.headcountByDept || []} cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={3} dataKey="value" strokeWidth={0}>
-                    {(data.headcountByDept || []).map((d) => <Cell key={d.name} fill={d.color} />)}
+                  <Pie data={headcountData} cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={3} dataKey="value" strokeWidth={0}>
+                    {headcountData.map((d) => <Cell key={d.name} fill={d.color} />)}
                   </Pie>
                   <Tooltip formatter={(v, n) => [`${v} employees`, n]} contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #E2E8F0' }} />
                 </PieChart>
               </ResponsiveContainer>
               <div className="space-y-2 self-center">
-                {(data.headcountByDept || []).map((d) => (
+                {headcountData.map((d) => (
                   <div key={d.name} className="flex items-center justify-between text-sm">
                     <div className="flex items-center gap-2">
                       <span className="w-3 h-3 rounded-full shrink-0" style={{ background: d.color }} />
@@ -484,23 +606,39 @@ function ReportPanel({ report, onClose }) {
                 </div>
               </div>
             </div>
-            <div className="px-4 py-3 border-t border-gray-100 flex justify-end">
-              <button onClick={() => exportCSV('headcount_report.csv',
-                ['Department', 'Count', 'Percentage'],
-                (data.headcountByDept || []).map((d) => [d.name, d.value, (total > 0 ? Math.round(d.value / total * 100) : 0) + '%'])
-              )} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition-colors">
-                <Download className="w-4 h-4" /> Export CSV
-              </button>
+            <div className="px-4 py-3 border-t border-gray-100 flex items-center justify-between gap-3">
+              <p className="text-xs text-gray-400">Total Active Employees: {total}</p>
+              <div className="flex items-center gap-2">
+                <button onClick={handlePrint} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 text-gray-700 text-xs font-medium transition-colors">
+                  <FileText className="w-3.5 h-3.5" /> Print / PDF
+                </button>
+                <button onClick={() => exportCSV('headcount_report.csv',
+                  ['Department', 'Count', 'Percentage'],
+                  headcountData.map((d) => [d.name, d.value, (total > 0 ? Math.round(d.value / total * 100) : 0) + '%'])
+                )} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium transition-colors">
+                  <Download className="w-3.5 h-3.5" /> Export CSV
+                </button>
+              </div>
             </div>
           </>
         )
       }
 
       case 'employee_joiners': {
-        const joiners = data.joinersExits || []
+        const joiners = filterBySearch(data.joinersExits || [])
         const joinersCount = joiners.filter(j => j.type === 'joiner').length
         const exitsCount = joiners.filter(j => j.type === 'exit').length
         const netGrowth = joinersCount - exitsCount
+
+        if (joiners.length === 0) {
+          return (
+            <div className="flex flex-col items-center justify-center py-16 text-gray-400 text-sm">
+              <Search className="w-8 h-8 mb-2 text-gray-300" />
+              <p>No data available for the selected filters.</p>
+            </div>
+          )
+        }
+
         return (
           <>
             <div className="flex gap-4 mb-4">
@@ -528,7 +666,7 @@ function ReportPanel({ report, onClose }) {
                 </thead>
                 <tbody>
                   {joiners.map((j) => (
-                    <tr key={j.id} className="border-b border-gray-100 hover:bg-gray-50">
+                    <tr key={j.rawId || j.id} className="border-b border-gray-100 hover:bg-gray-50">
                       <td className="px-4 py-3">
                         <p className="text-sm font-medium text-gray-900">{j.name}</p>
                         <p className="text-xs text-gray-400 font-mono">{j.id}</p>
@@ -547,13 +685,19 @@ function ReportPanel({ report, onClose }) {
                 </tbody>
               </table>
             </div>
-            <div className="px-4 py-3 border-t border-gray-100 flex justify-end">
-              <button onClick={() => exportCSV(`joiners_exits_${month.toLowerCase().replace(' ', '_')}.csv`,
-                ['Name', 'ID', 'Department', 'Designation', 'Date', 'Type'],
-                joiners.map((j) => [j.name, j.id, j.dept, j.role, j.date, j.type])
-              )} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition-colors">
-                <Download className="w-4 h-4" /> Export CSV
-              </button>
+            <div className="px-4 py-3 border-t border-gray-100 flex items-center justify-between gap-3">
+              <p className="text-xs text-gray-400">Showing {joiners.length} records</p>
+              <div className="flex items-center gap-2">
+                <button onClick={handlePrint} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 text-gray-700 text-xs font-medium transition-colors">
+                  <FileText className="w-3.5 h-3.5" /> Print / PDF
+                </button>
+                <button onClick={() => exportCSV(`joiners_exits_${month.toLowerCase().replace(' ', '_')}.csv`,
+                  ['Name', 'ID', 'Department', 'Designation', 'Date', 'Type'],
+                  joiners.map((j) => [j.name, j.id, j.dept, j.role, j.date, j.type])
+                )} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium transition-colors">
+                  <Download className="w-3.5 h-3.5" /> Export CSV
+                </button>
+              </div>
             </div>
           </>
         )
@@ -563,8 +707,6 @@ function ReportPanel({ report, onClose }) {
         return <p className="text-sm text-gray-400 p-4">Report not available.</p>
     }
   }
-
-  const needsSearch = ['attendance_monthly', 'leave_summary', 'payroll_monthly'].includes(report.id)
 
   return (
     <>
@@ -579,7 +721,7 @@ function ReportPanel({ report, onClose }) {
             </div>
             <div>
               <p className="text-base font-semibold text-gray-900">{report.title}</p>
-              <p className="text-xs text-gray-400">{month}</p>
+              <p className="text-xs text-gray-400">{month} · Filters applied</p>
             </div>
           </div>
           <button onClick={onClose} className="p-2 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors">
@@ -587,23 +729,42 @@ function ReportPanel({ report, onClose }) {
           </button>
         </div>
 
-        {/* Filters */}
-        <div className="flex items-center gap-3 px-6 py-3 border-b border-gray-100 shrink-0 flex-wrap">
-          <div className="flex items-center gap-2">
+        {/* Filters bar */}
+        <div className="flex items-center gap-3 px-6 py-3 border-b border-gray-100 shrink-0 flex-wrap bg-gray-50/50">
+          <div className="flex items-center gap-1.5">
             <Filter className="w-3.5 h-3.5 text-gray-400" />
             <select value={month} onChange={(e) => setMonth(e.target.value)}
-              className="border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
-              {['March 2026', 'February 2026', 'January 2026'].map((m) => <option key={m}>{m}</option>)}
+              className="border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+              {monthOptions.map((m) => <option key={m}>{m}</option>)}
             </select>
           </div>
-          {needsSearch && (
-            <div className="relative flex-1 min-w-40">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
-              <input type="text" placeholder="Search employee…" value={search} onChange={(e) => setSearch(e.target.value)}
-                className="w-full pl-8 pr-3 py-1.5 border border-gray-300 rounded-lg text-sm
-                  focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder:text-gray-400" />
-            </div>
-          )}
+
+          <div className="flex items-center gap-1.5">
+            <select value={selectedDept} onChange={(e) => setSelectedDept(e.target.value)}
+              className="border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+              <option value="all">All Departments</option>
+              {(data?.departments || ['Engineering', 'HR', 'Finance', 'Operations']).map((d) => (
+                <option key={d} value={d}>{d}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <select value={selectedEmpId} onChange={(e) => setSelectedEmpId(e.target.value)}
+              className="border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white max-w-44 truncate">
+              <option value="all">All Employees</option>
+              {(data?.allEmployees || []).map((emp) => (
+                <option key={emp.id} value={emp.id}>{emp.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="relative flex-1 min-w-36">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+            <input type="text" placeholder="Search name, ID, dept…" value={search} onChange={(e) => setSearch(e.target.value)}
+              className="w-full pl-8 pr-3 py-1.5 border border-gray-300 rounded-lg text-xs
+                focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder:text-gray-400 bg-white" />
+          </div>
         </div>
 
         {/* Content */}

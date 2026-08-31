@@ -42,9 +42,6 @@ const ROLE_LABELS = {
   employee: 'Employee',
 }
 
-function initials(str) {
-  return (str || '').slice(0, 2).toUpperCase()
-}
 
 export default function Sidebar({ mobile = false, onClose }) {
   const navigate = useNavigate()
@@ -91,10 +88,10 @@ export default function Sidebar({ mobile = false, onClose }) {
               {group.label}
             </p>
             <ul className="space-y-0.5">
-              {group.items.map(({ to, icon: Icon, label }) => (
-                <li key={to}>
+              {group.items.map((item) => (
+                <li key={item.to}>
                   <NavLink
-                    to={to}
+                    to={item.to}
                     onClick={mobile ? onClose : undefined}
                     className={({ isActive }) =>
                       `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150
@@ -108,9 +105,9 @@ export default function Sidebar({ mobile = false, onClose }) {
                       <>
                         <span className={`flex items-center justify-center w-7 h-7 rounded-lg transition-all
                           ${isActive ? 'bg-white/20' : 'group-hover:bg-white/5'}`}>
-                          <Icon className="w-4 h-4 shrink-0" />
+                          <item.icon className="w-4 h-4 shrink-0" />
                         </span>
-                        {label}
+                        {item.label}
                       </>
                     )}
                   </NavLink>

@@ -1,3 +1,4 @@
+import { createElement } from 'react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell,
@@ -7,6 +8,7 @@ import {
   CheckCircle, XCircle, AlertCircle, CalendarDays, ChevronRight, Coffee,
 } from 'lucide-react'
 import { useDashboardStats, useApproveLeaveDashboard } from '../../hooks/useDashboard'
+import { useAuthStore } from '../../stores/authStore'
 
 const LEAVE_TYPE_LABELS = {
   sick: 'Sick Leave',
@@ -73,11 +75,11 @@ function DeptLegend({ data }) {
   )
 }
 
-function StatCard({ label, value, change, icon: Icon, iconBg, iconColor }) {
+function StatCard({ label, value, change, icon, iconBg, iconColor }) {
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 flex items-center gap-4">
       <div className={`${iconBg} rounded-xl p-3 shrink-0`}>
-        <Icon className={`w-6 h-6 ${iconColor}`} />
+        {createElement(icon, { className: `w-6 h-6 ${iconColor}` })}
       </div>
       <div className="min-w-0">
         <p className="text-2xl font-bold text-gray-900">{value}</p>
@@ -94,8 +96,20 @@ function StatCard({ label, value, change, icon: Icon, iconBg, iconColor }) {
 }
 
 export default function HRDashboard() {
+  const { role } = useAuthStore()
   const { data, isLoading, error } = useDashboardStats()
   const approveLeave = useApproveLeaveDashboard()
+
+  const roleTitles = {
+    super_admin: 'Admin Dashboard',
+    admin: 'Admin Dashboard',
+    hr: 'HR Dashboard',
+    manager: 'Manager Dashboard',
+    rm: 'Manager Dashboard',
+    accounts: 'Finance Dashboard',
+  }
+
+  const dashboardTitle = roleTitles[role] || 'Dashboard'
 
   const today = new Date().toLocaleDateString('en-IN', {
     weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
@@ -133,7 +147,7 @@ export default function HRDashboard() {
 
       {/* Page header */}
       <div>
-        <h2 className="text-2xl font-bold text-gray-900">HR Dashboard</h2>
+        <h2 className="text-2xl font-bold text-gray-900">{dashboardTitle}</h2>
         <p className="text-sm text-gray-500 mt-0.5">{today} · Overview of your workforce</p>
       </div>
 

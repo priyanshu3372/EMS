@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Outlet, useLocation, Navigate } from 'react-router-dom'
 import Sidebar from './Sidebar'
 import TopBar from './TopBar'
+import ProfileDrawer from './ProfileDrawer'
 import { useAuthStore } from '../stores/authStore'
 
 const PAGE_TITLES = {
@@ -67,6 +68,9 @@ export default function Layout() {
           <Outlet />
         </main>
       </div>
+
+      {/* Profile Drawer */}
+      <ProfileDrawer />
     </div>
   )
 }

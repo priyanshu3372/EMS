@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
+import { sendNotification } from './useNotifications'
 
 const DEPT_COLORS = {
   'Engineering': '#2563EB',
@@ -18,10 +19,10 @@ export function useDashboardStats() {
     queryKey: ['dashboard_stats', today],
     queryFn: async () => {
       const [
-        { data: employees, error: empErr },
-        { data: todayAttendance, error: attErr },
-        { data: pendingLeaves, error: leaveErr },
-        { data: weekAttendance, error: weekErr },
+        { data: employees },
+        { data: todayAttendance },
+        { data: pendingLeaves },
+        { data: weekAttendance },
       ] = await Promise.all([
         supabase.from('profiles').select('id, full_name, department, designation, date_of_joining, status').eq('status', 'active'),
         supabase.from('attendance').select('employee_id, status').eq('date', today),
@@ -98,15 +99,36 @@ export function useApproveLeaveDashboard() {
   return useMutation({
     mutationFn: async ({ id, status }) => {
       const { data: { user } } = await supabase.auth.getUser()
+
+      const { data: req } = await supabase
+        .from('leave_requests')
+        .select('employee_id, leave_type, days')
+        .eq('id', id)
+        .single()
+
       const { error } = await supabase
         .from('leave_requests')
         .update({ status, reviewed_by: user?.id, reviewed_at: new Date().toISOString() })
         .eq('id', id)
       if (error) throw error
+
+      if (req?.employee_id) {
+        const leaveLabel = req.leave_type ? `${req.leave_type.charAt(0).toUpperCase() + req.leave_type.slice(1)} Leave` : 'Leave'
+        const isApproved = status === 'approved'
+
+        await sendNotification({
+          userId: req.employee_id,
+          title: `Leave Request ${isApproved ? 'Approved' : 'Rejected'}`,
+          message: `Your ${leaveLabel} request for ${req.days || 1} day(s) has been ${status}.`,
+          type: 'leave',
+          link: '/leave'
+        })
+      }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['dashboard_stats'] })
       qc.invalidateQueries({ queryKey: ['leave_requests'] })
+      qc.invalidateQueries({ queryKey: ['notifications'] })
     },
   })
 }

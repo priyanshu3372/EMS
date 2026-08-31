@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { createElement, useState, useMemo } from 'react'
 import {
   CheckCircle, XCircle, Clock, CalendarDays, Plus,
   Search, Download, ChevronRight, Palmtree, Filter,
@@ -10,26 +10,26 @@ import { useAuthStore } from '../stores/authStore'
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const LEAVE_TYPE_META = {
-  casual:    { label: 'Casual Leave',    cls: 'bg-blue-100 text-blue-700' },
-  sick:      { label: 'Sick Leave',      cls: 'bg-red-100 text-red-600' },
-  earned:    { label: 'Earned Leave',    cls: 'bg-purple-100 text-purple-700' },
+  casual: { label: 'Casual Leave', cls: 'bg-blue-100 text-blue-700' },
+  sick: { label: 'Sick Leave', cls: 'bg-red-100 text-red-600' },
+  earned: { label: 'Earned Leave', cls: 'bg-purple-100 text-purple-700' },
   maternity: { label: 'Maternity Leave', cls: 'bg-pink-100 text-pink-700' },
   paternity: { label: 'Paternity Leave', cls: 'bg-indigo-100 text-indigo-700' },
-  wfh:       { label: 'WFH',            cls: 'bg-teal-100 text-teal-700' },
-  comp_off:  { label: 'Comp Off',       cls: 'bg-orange-100 text-orange-700' },
+  wfh: { label: 'WFH', cls: 'bg-teal-100 text-teal-700' },
+  comp_off: { label: 'Comp Off', cls: 'bg-orange-100 text-orange-700' },
 }
 
 const STATUS_META = {
-  pending:  { label: 'Pending',  cls: 'bg-amber-100 text-amber-700',  icon: Clock },
-  approved: { label: 'Approved', cls: 'bg-green-100 text-green-700',  icon: CheckCircle },
-  rejected: { label: 'Rejected', cls: 'bg-red-100 text-red-600',      icon: XCircle },
+  pending: { label: 'Pending', cls: 'bg-amber-100 text-amber-700', icon: Clock },
+  approved: { label: 'Approved', cls: 'bg-green-100 text-green-700', icon: CheckCircle },
+  rejected: { label: 'Rejected', cls: 'bg-red-100 text-red-600', icon: XCircle },
 }
 
 const HOLIDAY_TYPE = {
-  national: { cls: 'bg-blue-100 text-blue-700',   label: 'National' },
+  national: { cls: 'bg-blue-100 text-blue-700', label: 'National' },
   festival: { cls: 'bg-orange-100 text-orange-700', label: 'Festival' },
   regional: { cls: 'bg-purple-100 text-purple-700', label: 'Regional' },
-  optional: { cls: 'bg-gray-100 text-gray-600',   label: 'Optional' },
+  optional: { cls: 'bg-gray-100 text-gray-600', label: 'Optional' },
 }
 
 function formatDate(str) {
@@ -51,7 +51,7 @@ function initials(name) {
   return (name || '').split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()
 }
 
-function RequestsTab({ requests, onApprove, onReject, onApply, isLoading }) {
+function RequestsTab({ requests, onApprove, onReject, isLoading, isManagement }) {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [typeFilter, setTypeFilter] = useState('all')
@@ -69,7 +69,7 @@ function RequestsTab({ requests, onApprove, onReject, onApply, isLoading }) {
   }), [requests, statusFilter, typeFilter, search])
 
   const counts = useMemo(() => ({
-    pending:  requests.filter((r) => r.status === 'pending').length,
+    pending: requests.filter((r) => r.status === 'pending').length,
     approved: requests.filter((r) => r.status === 'approved').length,
     rejected: requests.filter((r) => r.status === 'rejected').length,
   }), [requests])
@@ -80,15 +80,15 @@ function RequestsTab({ requests, onApprove, onReject, onApply, isLoading }) {
       {/* Stats */}
       <div className="grid grid-cols-3 gap-4">
         {[
-          { key: 'pending',  label: 'Pending',  Icon: Clock,        bg: 'bg-amber-100',  text: 'text-amber-600' },
-          { key: 'approved', label: 'Approved', Icon: CheckCircle,  bg: 'bg-green-100',  text: 'text-green-600' },
-          { key: 'rejected', label: 'Rejected', Icon: XCircle,      bg: 'bg-red-100',    text: 'text-red-600' },
+          { key: 'pending', label: 'Pending', Icon: Clock, bg: 'bg-amber-100', text: 'text-amber-600' },
+          { key: 'approved', label: 'Approved', Icon: CheckCircle, bg: 'bg-green-100', text: 'text-green-600' },
+          { key: 'rejected', label: 'Rejected', Icon: XCircle, bg: 'bg-red-100', text: 'text-red-600' },
         ].map(({ key, label, Icon, bg, text }) => (
           <button key={key} onClick={() => setStatusFilter(statusFilter === key ? 'all' : key)}
             className={`bg-white rounded-xl border shadow-sm p-4 flex items-center gap-4 transition-all text-left
               ${statusFilter === key ? 'border-blue-400 ring-1 ring-blue-400' : 'border-gray-200 hover:border-gray-300'}`}>
             <div className={`${bg} rounded-xl p-3 shrink-0`}>
-              <Icon className={`w-5 h-5 ${text}`} />
+              {createElement(Icon, { className: `w-5 h-5 ${text}` })}
             </div>
             <div>
               <p className="text-2xl font-bold text-gray-900">{counts[key]}</p>
@@ -186,17 +186,19 @@ function RequestsTab({ requests, onApprove, onReject, onApply, isLoading }) {
                     </td>
                     <td className="px-5 py-3.5">
                       <div className="flex items-center justify-end gap-2">
-                        {req.status === 'pending' ? (
+                        {isManagement && req.status === 'pending' ? (
                           <>
-                            <button onClick={() => onApprove(req.id)}
+                            <button onClick={() => onApprove(req.id, req.employee_id, req.leave_type, req.days)}
                               className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-green-50 hover:bg-green-100 text-green-700 text-xs font-medium transition-colors">
                               <CheckCircle className="w-3.5 h-3.5" /> Approve
                             </button>
-                            <button onClick={() => onReject(req.id)}
+                            <button onClick={() => onReject(req.id, req.employee_id, req.leave_type, req.days)}
                               className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 text-xs font-medium transition-colors">
                               <XCircle className="w-3.5 h-3.5" /> Reject
                             </button>
                           </>
+                        ) : req.status === 'pending' ? (
+                          <span className="text-xs text-amber-600 font-medium">Pending Approval</span>
                         ) : (
                           <span className="text-xs text-gray-400 italic">No action</span>
                         )}
@@ -220,13 +222,13 @@ function RequestsTab({ requests, onApprove, onReject, onApply, isLoading }) {
 
 const BALANCE_TYPES = [
   { key: 'casual', label: 'Casual', max: 12, color: 'bg-blue-500' },
-  { key: 'sick',   label: 'Sick',   max: 12, color: 'bg-red-400' },
+  { key: 'sick', label: 'Sick', max: 12, color: 'bg-red-400' },
   { key: 'earned', label: 'Earned', max: 18, color: 'bg-purple-500' },
-  { key: 'wfh',    label: 'WFH',   max: 24, color: 'bg-teal-500' },
+  { key: 'wfh', label: 'WFH', max: 24, color: 'bg-teal-500' },
 ]
 
-function BalanceTab() {
-  const { data: balances = [], isLoading } = useLeaveBalances()
+function BalanceTab({ userId, role }) {
+  const { data: balances = [], isLoading } = useLeaveBalances(userId, role)
   return (
     <div className="space-y-4">
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
@@ -377,19 +379,20 @@ function HolidaysTab() {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function Leave() {
-  const { data: requests = [], isLoading } = useLeaveRequests()
+  const { user, role } = useAuthStore()
+  const isManagement = ['super_admin', 'admin', 'hr', 'manager', 'rm'].includes(role)
+  const { data: requests = [], isLoading } = useLeaveRequests(user?.id, role)
   const updateLeaveStatus = useUpdateLeaveStatus()
   const applyLeave = useApplyLeave()
-  const { user } = useAuthStore()
   const [tab, setTab] = useState('requests')
   const [applyOpen, setApplyOpen] = useState(false)
 
-  function handleApprove(id) {
-    updateLeaveStatus.mutate({ id, status: 'approved', reviewed_by: user?.id })
+  function handleApprove(id, employeeId, leaveType, days) {
+    updateLeaveStatus.mutate({ id, status: 'approved', reviewed_by: user?.id, employee_id: employeeId, leave_type: leaveType, days })
   }
 
-  function handleReject(id) {
-    updateLeaveStatus.mutate({ id, status: 'rejected', reviewed_by: user?.id })
+  function handleReject(id, employeeId, leaveType, days) {
+    updateLeaveStatus.mutate({ id, status: 'rejected', reviewed_by: user?.id, employee_id: employeeId, leave_type: leaveType, days })
   }
 
   function handleApply(data) {
@@ -442,9 +445,9 @@ export default function Leave() {
 
         {/* Tab content */}
         {tab === 'requests' && (
-          <RequestsTab requests={requests} isLoading={isLoading} onApprove={handleApprove} onReject={handleReject} onApply={handleApply} />
+          <RequestsTab requests={requests} isLoading={isLoading} onApprove={handleApprove} onReject={handleReject} onApply={handleApply} isManagement={isManagement} />
         )}
-        {tab === 'balance' && <BalanceTab />}
+        {tab === 'balance' && <BalanceTab userId={user?.id} role={role} />}
         {tab === 'holidays' && <HolidaysTab />}
       </div>
 

@@ -37,7 +37,7 @@ export default function SignIn() {
           return
         }
         targetEmail = profile.email
-      } catch (err) {
+      } catch {
         setError('Error resolving Employee ID.')
         setSubmitting(false)
         return
@@ -222,4 +222,3 @@ export default function SignIn() {
     </div>
   )
 }
-

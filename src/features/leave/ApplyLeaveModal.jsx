@@ -16,8 +16,8 @@ const EMPTY = { leave_type: 'casual', from_date: '', to_date: '', reason: '' }
 function workingDays(from, to) {
   if (!from || !to) return 0
   let count = 0
-  const d = new Date(from)
-  const end = new Date(to)
+  const d = new Date(from + 'T00:00:00')
+  const end = new Date(to + 'T00:00:00')
   while (d <= end) {
     const day = d.getDay()
     if (day !== 0 && day !== 6) count++

@@ -7,11 +7,12 @@ function fmt(n) {
 export default function PayslipModal({ open, onClose, employee, month }) {
   if (!open || !employee) return null
 
-  const { full_name, name: legacyName, employee_id, department, designation, pan, bank_name, bank: legacyBank, salary } = employee
+  const { full_name, name: legacyName, employee_id, department, designation, pan, bank_name, bank_account, ifsc, bank: legacyBank, salary } = employee
   const { basic, hra, da, special, gross, pf, esi, pt, net } = salary
 
   const name = full_name || legacyName || ''
-  const bank = bank_name || legacyBank || ''
+  const bankNameVal = bank_name || legacyBank || 'Bank Transfer'
+  const bank = bank_account ? `${bankNameVal} (${bank_account}${ifsc ? ` · IFSC: ${ifsc}` : ''})` : bankNameVal
   const initials = name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()
 
   function handlePrint() { window.print() }

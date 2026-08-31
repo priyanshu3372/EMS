@@ -5,9 +5,11 @@ export const useAuthStore = create((set) => ({
   profile: null,
   role: null,
   loading: true, // true until session is confirmed or ruled out
+  profileDrawerOpen: false,
   setUser: (user) => set({ user }),
   setProfile: (profile) => set({ profile }),
   setRole: (role) => set({ role }),
   setLoading: (loading) => set({ loading }),
-  clearAuth: () => set({ user: null, profile: null, role: null, loading: false }),
+  setProfileDrawerOpen: (profileDrawerOpen) => set({ profileDrawerOpen }),
+  clearAuth: () => set({ user: null, profile: null, role: null, loading: false, profileDrawerOpen: false }),
 }))

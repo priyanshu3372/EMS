@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { createElement, useState, useMemo } from 'react'
 import {
   UserCheck, UserX, Clock, Monitor, Search,
   ChevronLeft, ChevronRight, Download, Edit2, Calendar,
@@ -113,7 +113,7 @@ export default function Attendance() {
 
   // For monthly calendar
   const [calYear, calMonth] = date.split('-').map(Number)
-  const { data: monthRecords = [], isLoading: calLoading } = useMonthAttendance(calYear, calMonth)
+  const { data: monthRecords = [] } = useMonthAttendance(calYear, calMonth)
 
   const canAmend = ['super_admin', 'hr'].includes(role)
 
@@ -163,8 +163,33 @@ export default function Attendance() {
       check_in: updated.check_in || null,
       check_out: updated.check_out || null,
       note: updated.note || '',
+      check_in_lat: updated.check_in_lat,
+      check_in_lon: updated.check_in_lon,
+      distance_km: updated.distance_km,
+      geofence_verified: updated.geofence_verified,
     })
     setModalEmp(null)
+  }
+
+  function handleExportCSV() {
+    const headers = ['Employee Name', 'Employee ID', 'Department', 'Designation', 'Status', 'Check In', 'Check Out', 'Hours Worked', 'Note']
+    const rows = filtered.map((r) => [
+      r.full_name || '',
+      r.employee_id || '',
+      r.department || '',
+      r.designation || '',
+      r.status || 'Not Marked',
+      r.check_in || '',
+      r.check_out || '',
+      hoursWorked(r.check_in, r.check_out),
+      r.note || '',
+    ])
+    const lines = [headers.join(','), ...rows.map((row) => row.map((v) => `"${v}"`).join(','))]
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = `attendance_${date}.csv`
+    a.click()
   }
 
   const marked  = records.filter((r) => r.status).length
@@ -192,6 +217,15 @@ export default function Attendance() {
             <p className="text-sm text-gray-500 mt-0.5">{formatDisplayDate(date)}</p>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                const empToMark = records.find(r => r.id === user?.id) || employees[0] || { id: user?.id || 'emp_1', full_name: user?.full_name || 'Employee', department: 'Operations' }
+                setModalEmp(empToMark)
+              }}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold transition-colors shadow-xs"
+            >
+              <UserCheck className="w-4 h-4" /> Mark Today&apos;s Attendance
+            </button>
             {role !== 'employee' && (
               <div className="flex items-center bg-gray-100 rounded-lg p-1">
                 <button onClick={() => setView('daily')}
@@ -206,7 +240,7 @@ export default function Attendance() {
                 </button>
               </div>
             )}
-            <button className="flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 text-sm font-medium text-gray-700 transition-colors">
+            <button onClick={handleExportCSV} className="flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 text-sm font-medium text-gray-700 transition-colors">
               <Download className="w-4 h-4" /> Export
             </button>
           </div>
@@ -242,12 +276,12 @@ export default function Attendance() {
               { key: 'wfh',        icon: Monitor,   label: 'WFH',        iconBg: 'bg-blue-100',     iconColor: 'text-blue-600' },
               { key: 'half_day',   icon: Clock,     label: 'Half Day',   iconBg: 'bg-purple-100',   iconColor: 'text-purple-600' },
               { key: 'weekly_off', icon: Clock,     label: 'Weekly Off', iconBg: 'bg-indigo-100',   iconColor: 'text-indigo-600' },
-            ].map(({ key, icon: Icon, label, iconBg, iconColor }) => (
+            ].map(({ key, icon, label, iconBg, iconColor }) => (
               <button key={key} onClick={() => setTab(tab === key ? 'all' : key)}
                 className={`bg-white rounded-xl border shadow-sm p-4 flex items-center gap-3 text-left transition-all
                   ${tab === key ? 'border-blue-400 ring-1 ring-blue-400' : 'border-gray-200 hover:border-gray-300'}`}>
                 <div className={`${iconBg} rounded-lg p-2 shrink-0`}>
-                  <Icon className={`w-5 h-5 ${iconColor}`} />
+                  {createElement(icon, { className: `w-5 h-5 ${iconColor}` })}
                 </div>
                 <div>
                   <p className="text-xl font-bold text-gray-900">{stats[key]}</p>
@@ -387,11 +421,11 @@ export default function Attendance() {
                               <span className="text-xs text-gray-300 italic">Not marked</span>
                             )}
                           </td>
-                          {canAmend && (
+                          {(canAmend || rec.id === user?.id) && (
                             <td className="px-5 py-3.5 text-right">
                               <button onClick={() => setModalEmp(rec)}
-                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-blue-50 hover:text-blue-600
-                                  text-gray-600 text-xs font-medium transition-colors ml-auto">
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100
+                                  text-xs font-semibold transition-colors ml-auto shadow-2xs">
                                 <Edit2 className="w-3.5 h-3.5" />
                                 {rec.status ? 'Edit' : 'Mark'}
                               </button>
@@ -421,4 +455,3 @@ export default function Attendance() {
     </>
   )
 }
-

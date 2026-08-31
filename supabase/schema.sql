@@ -20,7 +20,7 @@ create table profiles (
     full_name text not null,
     email text unique not null,
     role text not null default 'employee' check (role in ('super_admin', 'admin', 'hr', 'manager', 'rm', 'accounts', 'employee')),
-    status text not null default 'active' check (status in ('active', 'inactive')),
+    status text not null default 'active' check (status in ('active', 'inactive', 'invited')),
     employee_id text unique,
     department text,
     designation text,
@@ -126,6 +126,10 @@ create table payslips (
     employee_id uuid not null references profiles(id) on delete cascade,
     payroll_run_id uuid not null references payroll_runs(id) on delete cascade,
     gross numeric not null check (gross >= 0),
+    basic numeric not null default 0 check (basic >= 0),
+    hra numeric not null default 0 check (hra >= 0),
+    da numeric not null default 0 check (da >= 0),
+    special_allowance numeric not null default 0 check (special_allowance >= 0),
     pf numeric not null check (pf >= 0),
     esi numeric not null check (esi >= 0),
     pt numeric not null check (pt >= 0),
@@ -153,7 +157,9 @@ create table employee_documents (
     id uuid primary key default gen_random_uuid(),
     employee_id uuid not null references profiles(id) on delete cascade,
     doc_type text not null check (doc_type in ('aadhaar', 'pan', 'passport', 'resume', 'offer_letter', 'edu_certificate', 'exp_letter', 'other')),
-    url text not null,
+    file_name text not null,
+    file_path text not null,
+    file_size bigint not null default 0 check (file_size >= 0),
     document_verification_status text not null default 'pending' check (document_verification_status in ('pending', 'verified', 'rejected')),
     verified_by uuid references profiles(id) on delete set null,
     verified_at timestamptz,
@@ -312,3 +318,43 @@ $$;
 create or replace trigger on_auth_user_created
     after insert on auth.users
     for each row execute function handle_new_user();
+
+-- Trigger logic to automatically deduct/refund leave balances when leave requests are approved/changed
+create or replace function process_leave_balance_update()
+returns trigger
+security definer
+language plpgsql
+as $$
+declare
+    leave_year integer;
+    col_name text;
+begin
+    leave_year := extract(year from new.from_date)::integer;
+    col_name := new.leave_type;
+
+    -- Only deduct if leave type is one of the balance columns
+    if col_name in ('casual', 'sick', 'earned', 'wfh', 'comp_off') then
+        if new.status = 'approved' and (old.status is null or old.status != 'approved') then
+            -- Deduct balance
+            execute format('
+                update public.leave_balances 
+                set %I = greatest(0, %I - $1) 
+                where employee_id = $2 and year = $3', col_name, col_name)
+            using new.days, new.employee_id, leave_year;
+        elsif old.status = 'approved' and (new.status is null or new.status != 'approved') then
+            -- Refund balance
+            execute format('
+                update public.leave_balances 
+                set %I = %I + $1 
+                where employee_id = $2 and year = $3', col_name, col_name)
+            using new.days, new.employee_id, leave_year;
+        end if;
+    end if;
+    return new;
+end;
+$$;
+
+create or replace trigger update_leave_balance_on_approval
+    after update on public.leave_requests
+    for each row execute function process_leave_balance_update();
+

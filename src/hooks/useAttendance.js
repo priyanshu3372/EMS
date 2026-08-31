@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
+import { sendNotification } from './useNotifications'
 
 export function useAttendance(date) {
   return useQuery({
@@ -43,10 +44,22 @@ export function useMarkAttendance() {
         .from('attendance')
         .upsert(record, { onConflict: 'employee_id,date' })
       if (error) throw error
+
+      if (record.employee_id) {
+        const formattedStatus = record.status ? record.status.replace('_', ' ').toUpperCase() : 'Recorded'
+        await sendNotification({
+          userId: record.employee_id,
+          title: 'Attendance Marked',
+          message: `Attendance for ${record.date} recorded as ${formattedStatus}.`,
+          type: 'attendance',
+          link: '/attendance'
+        })
+      }
     },
     onSuccess: (_, vars) => {
       qc.invalidateQueries({ queryKey: ['attendance', vars.date] })
       qc.invalidateQueries({ queryKey: ['attendance', 'month'] })
+      qc.invalidateQueries({ queryKey: ['notifications'] })
     },
   })
 }
