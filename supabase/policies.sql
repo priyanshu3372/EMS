@@ -20,7 +20,7 @@ begin
     where id = auth.uid() and role = p_role and status = 'active'
   );
 end;
-$$ language plpgsql security definer;
+$$ language plpgsql security definer set search_path = public;
 
 -- Helper function to check if the caller has any of the listed roles
 create or replace function public.has_any_role(p_roles text[])
@@ -31,23 +31,26 @@ begin
     where id = auth.uid() and role = any(p_roles) and status = 'active'
   );
 end;
-$$ language plpgsql security definer;
+$$ language plpgsql security definer set search_path = public;
 
 
 -- ==========================================
 -- PROFILES POLICIES
 -- ==========================================
 
+drop policy if exists "Enable select for authenticated users" on profiles;
 create policy "Enable select for authenticated users"
     on profiles for select
     to authenticated
     using (true);
 
+drop policy if exists "Enable insert for super_admin, admin, and hr" on profiles;
 create policy "Enable insert for super_admin, admin, and hr"
     on profiles for insert
     to authenticated
     with check (public.has_any_role(array['super_admin', 'admin', 'hr']));
 
+drop policy if exists "Enable update for admin/hr and self" on profiles;
 create policy "Enable update for admin/hr and self"
     on profiles for update
     to authenticated
@@ -56,6 +59,7 @@ create policy "Enable update for admin/hr and self"
         public.has_any_role(array['super_admin', 'admin', 'hr'])
     );
 
+drop policy if exists "Enable delete for super_admin" on profiles;
 create policy "Enable delete for super_admin"
     on profiles for delete
     to authenticated
