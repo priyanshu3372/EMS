@@ -64,6 +64,68 @@ Everything below makes these **structurally impossible**, not merely fixed once.
 
 ---
 
+## A1.5 Confirmed client requirements
+
+Answered by the client. These are decisions, not open questions — build to them.
+
+### Statutory
+
+| | Decision |
+|---|---|
+| PF | **Applicable.** Rate is 12% but must be **editable**, and the employer wants it kept low — i.e. restricted to the ₹15,000 wage ceiling, so PF caps at ₹1,800/month. Both the rate and the restrict-to-ceiling flag live in `OrganizationPolicy` |
+| ESI | **Applicable.** Standard rates, eligibility locked per contribution period (§A6) |
+| PT | Per state, per employee |
+| TDS | Manual entry per employee per month (v1) |
+
+### Salary components
+
+Fixed list for v1: **Basic · HRA · DA · Conveyance · Special Allowance · Incentive**
+
+**Incentive is manually entered**, not computed — an authorised role (HR/Accounts) sets the amount per employee per month. It is taxable and part of gross.
+
+### Payslip — three country formats
+
+The client wants payslips that can be produced in **India, UK and US formats**, selected by the user, with the matching currency.
+
+> **Scope boundary, stated explicitly.** This is a **presentation** requirement — template and currency — **not** a statutory one. The system does **not** compute UK PAYE/National Insurance or US FICA/withholding. Those are three entirely different rule sets, each a project of its own.
+>
+> What v1 delivers: `country` and `currency` on the organization and employee, three payslip templates, amounts rendered in `₹ / £ / $`. Statutory calculation remains India-only.
+>
+> The `domain/payroll/` design already takes rules as data, so adding real UK or US statutory engines later means writing new rule files — not rebuilding the system. Flag this to the client in writing so nobody later assumes UK tax is being calculated.
+
+### Attendance — punch in / punch out
+
+- **One punch pair per day.** Morning in, evening out. One attendance row per employee per day
+- **Hours worked is computed and stored** on the row, not merely displayed
+- **Monthly total hours** must be visible per employee — the client explicitly asked for this
+- **Shift hours are configurable** (e.g. a 9-hour shift), so daily hours can be read against what was expected
+
+### Attendance modes — per employee, admin-controlled
+
+Two separate concepts, and both are needed:
+
+**`Employee.attendanceMode`** — the *policy* for that person:
+
+| Mode | Behaviour |
+|---|---|
+| `app` | Employee sees the Check In / Check Out card. **Geofence applies** |
+| `biometric` | No card. Data arrives from the device. No geofence — they are standing at the machine |
+| `manual` | HR marks it |
+
+The client's example: 8 of 10 staff on `app`, 2 on `biometric`.
+
+**`Attendance.source`** — the *fact* about one row: `punch · biometric · manual · leave`
+
+Why both: an `app`-mode employee may still have one day corrected by HR. The mode stays `app`; that row's source is `manual`. A single field cannot express this, and without it nobody can tell who created a record.
+
+### Biometric data entry
+
+Confirmed: the machine can export CSV. **v1 imports biometric attendance by CSV upload** — reusing the import machinery from Day 10. Rows land with `source = biometric`.
+
+Direct device integration is deferred — it is device-specific and the machine has not been purchased yet.
+
+---
+
 ## A2. Layers
 
 ```
@@ -214,9 +276,9 @@ This fixes three shipped bugs at once: **bootstrap becomes possible** (the first
 |---|---|
 | Identity | User · Organization · Membership · **RefreshToken** · PasswordResetToken |
 | People | Employee · EmployeeFinancial · EmployeeBankAccount · **EmployeeStatutoryIdentity** · Department · Designation |
-| Time | Attendance · Holiday · WorkCalendar |
+| Time | Attendance · Holiday · **Shift** · WorkCalendar |
 | Leave | LeaveType · LeaveRequest · **LeaveLedgerEntry** |
-| Money | SalaryStructure · **PtSlab** · **EsiCoverage** · **EmployeeTdsDirective** · PayrollRun · Payslip · PayslipLine |
+| Money | SalaryStructure · **SalaryComponent** · **EmployeeIncentive** · **PtSlab** · **EsiCoverage** · **EmployeeTdsDirective** · PayrollRun · Payslip · PayslipLine |
 | Files | EmployeeDocument · CompanyDocument · FileObject |
 | System | OrganizationPolicy · Notification · AuditLog |
 
@@ -236,6 +298,9 @@ This fixes three shipped bugs at once: **bootstrap becomes possible** (the first
 | Every tenant table has `organizationId` NOT NULL | Adding it after go-live is the most expensive SaaS migration there is |
 | Every unique constraint includes `organizationId` | `@@unique([organizationId, employeeCode])` |
 | Soft delete everywhere | Statutory records must survive |
+| `Attendance.hoursWorked` is **stored**, not computed on read | Payroll, reports and the monthly total all read it. Recomputing it in three places is how the copies drift |
+| `Employee.attendanceMode` and `Attendance.source` are **separate** | Mode is the person's policy; source is the fact about one row. See §A1.5 |
+| `country` + `currency` on Organization and Employee | Payslip template and rendering. Statutory logic stays India-only for v1 |
 
 ### The schema is written fresh — five tables diverge, not two
 
@@ -550,7 +615,9 @@ Also add `prisma.seed` config so `migrate reset` actually reseeds:
 *(Four days, not three. Day 9 in version 1 held three days of work.)*
 
 ### Day 7 — Employee reads + the field contract
-**Build** — `Employee`, `EmployeeFinancial`, `EmployeeBankAccount`, **`EmployeeStatutoryIdentity`**, `Department`, `Designation`, `LeaveType`, `LeaveLedgerEntry` — **models and migration only**, so Day 8 can reference them. Employee repository/service/controller/routes. `GET /employees`, `GET /employees/:id` — **both scoped**. Allow-list serializers with the three permissions from §A7.
+**Build** — `Employee`, `EmployeeFinancial`, `EmployeeBankAccount`, **`EmployeeStatutoryIdentity`**, `Department`, `Designation`, `Shift`, `LeaveType`, `LeaveLedgerEntry` — **models and migration only**, so Day 8 can reference them. Employee repository/service/controller/routes. `GET /employees`, `GET /employees/:id` — **both scoped**. Allow-list serializers with the three permissions from §A7.
+
+On `Employee`, include the fields §A1.5 requires: **`attendanceMode`** (`app | biometric | manual`, default `app`), **`shiftId`**, and **`country` + `currency`**. `Shift` carries `name`, `startTime`, `endTime`, `breakMinutes` and `expectedHours` (default 9) — that last field is what makes "did they work their shift?" answerable.
 
 **Also today: generate `docs/field-contract.json`** by grepping the pages for field reads. Pin it before any module ships.
 
@@ -586,11 +653,42 @@ Rewire `useUsers.js` and the Settings → Users tab.
 
 ## PHASE 4 — Attendance and leave · Days 11–14
 
-### Day 11 — Attendance + dashboard part one
-**Build** — `Attendance` with the four geofence columns. `domain/shared/dates.ts` → `zonedToday(now, timezone)` and the Rule 8 lint ban. Server-side geofence. **Delete the "Simulate GPS inside office" button** (`MarkAttendanceModal.jsx:172-179`) and make the geofence **fail closed** on GPS denial. `GET /dashboard/summary` attendance figures, aggregated in Postgres.
+### Day 11 — Attendance and the punch flow
 
-### Day 12 — Attendance views + frontend
-**Build** — monthly view (fixes the `-31` bug), hours worked across midnight, regularization. Rewire `useAttendance.js`.
+**Build** — `Attendance` with the four geofence columns, plus **`source`** (`punch | biometric | manual | leave`) and **`hoursWorked`** stored on the row.
+
+`domain/shared/dates.ts` → `zonedToday(now, timezone)` and the Rule 8 lint ban. `domain/attendance/hours.ts` — duration across midnight, minus the shift's break minutes.
+
+**The punch flow** (§A1.5), two endpoints rather than one modal:
+
+| | |
+|---|---|
+| `POST /attendance/punch-in` | Creates today's row with `checkIn`, `source = punch`. Geofence checked **server-side**. Rejects a second punch-in for the same day |
+| `POST /attendance/punch-out` | Patches the same row with `checkOut`, computes and stores `hoursWorked`. Rejects if there was no punch-in |
+
+**Geofence applies only to `attendanceMode = app`.** A biometric employee is standing at the machine; a GPS check there is meaningless.
+
+Employees need permission to update **their own row for today** — the audit found RLS currently blocks exactly this, which is why nobody can check out.
+
+**Delete the "Simulate GPS inside office" button** (`MarkAttendanceModal.jsx:172-179`) and make the geofence **fail closed** on GPS denial.
+
+`GET /dashboard/summary` attendance figures, aggregated in Postgres.
+
+### Day 12 — Attendance views, hours totals, biometric import
+
+**Build** — monthly view (fixes the `-31` bug), regularization, amendment rights.
+
+**Hours, which the client asked for specifically:**
+- Daily: hours worked against the shift's expected hours
+- **Monthly total hours per employee** — a Postgres aggregate over `hoursWorked`, not a browser-side sum
+
+**Punch card on the dashboard** — visible only when `attendanceMode = app`. Shows live state: *"Checked in 9:31 AM · 3h 24m so far"*, and the button flips to Check Out.
+
+**Biometric CSV import** — `POST /attendance/import`, same dry-run-then-commit shape as the employee importer. Columns: employee code, date, check-in, check-out. Rows land with `source = biometric`. Confirmed the client's machine can export CSV.
+
+`MarkAttendanceModal` stays — it is the `manual` path for HR.
+
+Rewire `useAttendance.js`.
 
 ### Day 13 — Leave
 **Build** — `LeaveRequest` + ledger. `domain/leave/leaveDays.ts` counting working days **excluding weekends and holidays**. `POST /leave-requests` and `/preview`. **Backfill opening ledger entries** for the imported employees.
@@ -618,6 +716,10 @@ The highest-risk phase. Money bugs destroy trust permanently.
 
 **PT is per-state, per-employee** — keyed to where the employee physically works, not one company setting. `PtSlab {state, effectiveFrom, gender, wageFrom, wageTo, amount, februaryAmount}`. Maharashtra: men — nil to 7,500, ₹175 to 10,000, ₹200 above, **₹300 in February**; women — nil to ₹25,000, then ₹200 / ₹300. Add an invariant test that annual PT never exceeds ₹2,500.
 
+**Components** — the client's confirmed list: **Basic · HRA · DA · Conveyance · Special Allowance · Incentive**. Model them as `SalaryComponent` rows (code, label, type `earning|deduction`, taxable, order) rather than fixed columns, so adding one later is a row and not a migration.
+
+**PF rate is editable and restricted to the ceiling** — both live in `OrganizationPolicy`, never in code. The client wants PF kept at the ₹15,000 ceiling, so the standard case caps at ₹1,800/month.
+
 **Golden test** per §A13.
 
 **Done when** — the golden test passes and all seven copies are deleted. *(The frontend copies live in files not rewired until Day 18 — delete them together and accept two days of a stale preview, or leave the frontend copies until Day 18 and enable the Rule 7 lint then.)*
@@ -632,12 +734,18 @@ The highest-risk phase. Money bugs destroy trust permanently.
 
 **TDS — manual mode for v1.** "Configured" means the accountant enters `EmployeeTdsDirective {employeeId, financialYear, monthlyAmount, enteredBy, effectiveFrom}` per active employee, including an explicit ₹0 with a reason. The run unblocks when every active employee has one. This is legal, auditable, and is what actually lets the client go live. A computed TDS engine with declarations and Form 16 is **explicitly out of v1 scope** — named here so nobody assumes it exists.
 
+**Incentive** — `EmployeeIncentive {employeeId, month, year, amountPaise, enteredBy, note}`, entered by HR or Accounts before the run. The run picks up whatever is recorded for that period; no amount means no incentive line. Never computed, never guessed.
+
 **Build** — `POST /payroll-runs` creating run + payslips + audit in one transaction with the raised timeout.
 
 ### Day 17 — Payslips and PDF
 **Build** — state machine enforced server-side, totals recomputed, locked after approval. `npm i pdfkit @types/pdfkit` — no browser needed, streams to a Buffer. Payslips stored to R2 with a content hash, served through an authenticated route. `GET /payslips/me`.
 
 **An Indian payslip must show:** employer name and address, employee name and code, designation, **UAN, PF member id, ESIC number, PAN**, pay period, paid days and LOP days, each earning and deduction as a line, gross, total deductions, net in figures and words, and the employer's PF/ESI contributions.
+
+**Three country templates** (§A1.5) — India, UK and US layouts, chosen from the employee's `country`, with amounts rendered in that `currency` (`₹ / £ / $`) and the right date format. Build the PDF renderer to take a template plus a payslip object, so a fourth country is a template file.
+
+> Say this to the client in writing: the UK and US templates **present** a payslip; they do not compute UK PAYE/NI or US FICA. Statutory calculation is India-only in v1. Without that sentence on record, someone will assume UK tax is being deducted.
 
 ### Day 18 — Payroll frontend
 **Build** — rewire `usePayroll.js`, payroll page, payslip modal, employee payslip view. Remove the fabricated statutory identifiers and the fake "Generated" badges. **Bank transfer advice file** — the client cannot pay anyone without it.
@@ -822,23 +930,36 @@ VITE_API_URL="http://localhost:4000/api"
 
 Commit `.env.example` for both, with empty values.
 
-## D3. Ask the client on Day 0
+## D3. Client questions — answered and still open
 
-**PF** — (a) Is the establishment covered under the EPF Act? Give me the establishment code and ECR credentials. (b) Does the employer restrict contributions to the ₹15,000 ceiling, or contribute on actual PF wages? (c) For each existing employee: were they an EPF member before joining? (d) Which salary components count as PF wages? (e) Is EDLI applicable?
+### ✅ Already answered — see §A1.5 for the decisions
 
-**ESI** — (f) Is the establishment ESI-covered, and under which sub-code? (g) Confirm the contribution-period rule is understood: eligibility locks for April–September and October–March.
+PF and ESI both apply · PF rate editable and restricted to the ₹15,000 ceiling · TDS is manual entry per employee per month · components are Basic/HRA/DA/Conveyance/Special/Incentive, incentive entered by hand · payslips in three country formats but **presentation only** · punch in/out once daily with stored hours and a monthly total · attendance mode per employee · biometric data arrives by CSV.
 
-**PT** — (h) In which **states** do employees physically work? I need one registration number per state.
+### ❗ Still needed — and what each blocks
 
-**TDS** — (i) Who computes TDS today, and will they supply a monthly amount per employee? (v1 is manual mode.)
+| # | Question | Blocks |
+|---|---|---|
+| 1 | **Does the CTC figure include employer PF and ESI?** If yes, monthly gross is **not** CTC ÷ 12 and every payslip changes | **Day 15** |
+| 2 | **A sample salary sheet** — ~30 rows: CTC and the expected Basic, HRA, DA, Conveyance, Special, PF, ESI, PT, TDS, net. Signed by the accountant. *This is the test that proves payroll is right; there is no substitute* | **Day 15** |
+| 3 | **PF establishment code**, and whether the employer restricts to the ceiling for everyone | **Day 15** |
+| 4 | **ESI sub-code** | Day 15 |
+| 5 | **Which states will employees work in?** PT is per state, one registration each | **Day 15** |
+| 6 | **Which components count as PF wages?** (Basic + DA usually, but the 2019 Supreme Court ruling widened it) | Day 15 |
+| 7 | **Leave year — Jan–Dec or Apr–Mar?** | **Day 13** |
+| 8 | **Leave types, days each, which carry forward** | **Day 13** |
+| 9 | **Manager approves anyone, or only direct reports?** | **Day 14** |
+| 10 | **Geofence — hard block, or record the exception and allow?** | **Day 11** |
+| 11 | Are `manager` and `rm` genuinely different roles? Their permissions are identical everywhere today | Day 6 |
+| 12 | Which biometric machine, and its CSV column layout | Day 12 |
 
-**CTC** — (j) Does the CTC figure include employer PF, employer ESI and gratuity? If yes, gross is **not** CTC ÷ 12, and every payslip changes.
+**Chase 1, 2 and 3 first.** They gate the longest phase, and an accountant takes days rather than hours.
 
-**Leave** — (k) Is the leave year January–December or April–March? (l) Which types carry forward, to what cap, and does anything lapse or get encashed? (m) What are the opening balances for every employee?
+Questions 7–11 have sensible Indian defaults — if an answer is slow, build the default as a **setting** and move on. Questions 1–3 have no safe default: a guessed salary formula is far worse than a late one.
 
-**Policy** — (n) Can a manager approve anyone, or only direct reports? (o) Are `manager` and `rm` genuinely different roles? (p) Is the geofence a hard block or a recorded flag?
+### No longer needed
 
-**Data** — (q) **Has anyone entered real employee data or uploaded real documents into the current system?** The audit indicates no — no first admin was ever created and Add Employee has never worked — in which case there is nothing to migrate and the new database starts empty. Confirm before Day 19 deletes the old client.
+Employee roster and opening leave balances. **Hiring has not started**, so there is nothing to migrate — employees are added through the admin panel as they are hired, each starting with a fresh quota. The CSV importer is still built on Day 10, for batch hiring and for biometric attendance.
 
 ## D4. If you fall behind — what gives way, in order
 
