@@ -434,9 +434,35 @@ The architecture still saves you most of the UI work. It does not save you from 
 
 The app stores Aadhaar and PAN scans, cancelled cheques and payslip PDFs — sensitive documents and statutory records kept for years.
 
-**A VPS has a persistent disk, so `local.ts` is viable in production too** — unlike Railway, Render, Heroku or Vercel, whose ephemeral filesystems wipe on every restart. The catch is that durability becomes yours: uploads must be in the daily offsite backup alongside the database dump, or a dead VPS takes every Aadhaar scan and payslip with it.
+### Files do not live on the VPS
 
-Build both implementations anyway. The interface costs nothing, and moving to R2 later is one environment variable.
+A VPS disk *is* persistent, so local storage would technically work. **It is still the wrong choice**, for one reason: **a VPS disk is a single copy.** Disk failure, an accidental `rm -rf`, or a destroyed VPS takes every Aadhaar scan and every payslip PDF with it — and those are statutory records kept for years.
+
+Which means files on the VPS would have to be backed up anyway. And the backup would go to R2. So:
+
+> If the backup is going to R2, keep the files in R2 in the first place. One copy in durable storage beats two copies where one is authoritative and the other drifts.
+
+**This also deletes an entire category of work.** File backup is the fiddly kind — incremental sync, tracking deletions, testing restores. R2 is already replicated; there is nothing to back up.
+
+### Where everything actually lives in production
+
+| | Location | Backed up how |
+|---|---|---|
+| Node app + React build | VPS | it is in Git |
+| **PostgreSQL** | **VPS** — a database needs a running process and a real filesystem; R2 cannot host one | daily `pg_dump` → **R2** |
+| **Uploaded files + payslip PDFs** | **Cloudflare R2** | R2 is already durable |
+| Neon | **development only** — no production role | — |
+
+| Environment | `STORAGE_DRIVER` |
+|---|---|
+| Development | `local` — so you can build without R2 credentials |
+| Production | **`r2`** |
+
+Both implementations get built. The interface is what makes the switch one environment variable.
+
+**Cost:** R2's free tier is 10 GB — roughly five years for 100 employees. Ten companies would be about 20 GB, around $0.22/month. **Downloads are free, always**, which matters because employees fetch payslips and documents constantly; on AWS S3 every one of those is billed bandwidth.
+
+**One thing the client must agree to:** employee documents leave their server and sit with Cloudflare. If they insist everything stays on their own machine, files can live on the VPS — but then a separate, tested file-backup routine becomes mandatory, and the single-copy risk above is theirs to accept.
 
 ```ts
 interface StorageService {
@@ -850,11 +876,11 @@ Then write **one sentence** for what "done" means today. On paper.
 
 ## C4. Databases
 
-| Database | For |
-|---|---|
-| `ems_dev` | daily work. Break it freely |
-| `ems_demo` | demos. Never experiment |
-| later `ems_prod` | real use |
+| Database | Where | For |
+|---|---|---|
+| `ems_dev` | Neon | daily work. Break it freely |
+| `ems_demo` | Neon | demos. Never experiment here |
+| production | **PostgreSQL on the VPS** | real use. **Neon has no production role** — see §A12 |
 
 **Structure syncs through Git; data does not — and that is the point.** One migration file applies to any database. Reference data travels as code through `seed/reference.ts`. Only test data differs, deliberately.
 
@@ -1002,7 +1028,7 @@ Tagging `v1.0` is not go-live. Budget one more week.
 | Step | Why |
 |---|---|
 | **Parallel run for one month** | Run the new payroll alongside however salary is calculated today, and reconcile every employee to the rupee. This is the only real proof |
-| **Client data load** | Real roster, opening leave balances, statutory identities, bank details, salary structures — into `ems_prod`, not `ems_demo` |
+| **Client data load** | Statutory identities, bank details and salary structures — into the **production database on the VPS**, never into `ems_demo` |
 | **HR training** | Two sessions: daily use, and the monthly payroll run |
 | **A written runbook** | How to run payroll, what to do when it fails, who to call |
 | **Then switch off the old system** | Not before the parallel month reconciles |
