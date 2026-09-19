@@ -19,10 +19,23 @@ const schema = z.object({
   /// which PgBouncer cannot provide.
   DIRECT_URL: z.string().startsWith('postgresql://'),
 
+  /// Access tokens are short-lived and never leave memory, so this key signs
+  /// something that is replaced every 15 minutes.
+  JWT_ACCESS_SECRET: z.string().min(32, 'JWT_ACCESS_SECRET must be at least 32 characters'),
+  /// Refresh tokens sit in a cookie for a week, so they are signed with a
+  /// DIFFERENT key. Sharing one key would let a refresh token be presented as
+  /// an access token, and the 15-minute access window would mean nothing.
+  JWT_REFRESH_SECRET: z.string().min(32, 'JWT_REFRESH_SECRET must be at least 32 characters'),
+  JWT_ACCESS_EXPIRY: z.string().default('15m'),
+  JWT_REFRESH_EXPIRY: z.string().default('7d'),
+
   /// 'local' in development; 'r2' in production, added on Day 19.
   /// Production never uses the VPS disk — see platform/storage/index.ts.
   STORAGE_DRIVER: z.enum(['local', 'r2']).default('local'),
   STORAGE_PATH: z.string().default('./uploads'),
+}).refine((c) => c.JWT_ACCESS_SECRET !== c.JWT_REFRESH_SECRET, {
+  path: ['JWT_REFRESH_SECRET'],
+  message: 'JWT_REFRESH_SECRET must differ from JWT_ACCESS_SECRET',
 })
 
 const parsed = schema.safeParse(process.env)
