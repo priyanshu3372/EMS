@@ -8,7 +8,8 @@
     "node": ">=20.19"
   },
   "prisma": {
-    "schema": "prisma/schema"
+    "schema": "prisma/schema",
+    "seed": "tsx prisma/seed/reference.ts"
   },
   "scripts": {
     "dev": "tsx watch src/main.ts",
@@ -17,10 +18,12 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "bootstrap": "tsx scripts/bootstrap.ts"
   },
   "dependencies": {
     "@prisma/client": "6.19.3",
+    "bcryptjs": "^3.0.3",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",

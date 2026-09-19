@@ -18,6 +18,11 @@ const schema = z.object({
   /// Unpooled endpoint — Prisma Migrate needs session-level advisory locks,
   /// which PgBouncer cannot provide.
   DIRECT_URL: z.string().startsWith('postgresql://'),
+
+  /// 'local' in development; 'r2' in production, added on Day 19.
+  /// Production never uses the VPS disk — see platform/storage/index.ts.
+  STORAGE_DRIVER: z.enum(['local', 'r2']).default('local'),
+  STORAGE_PATH: z.string().default('./uploads'),
 })
 
 const parsed = schema.safeParse(process.env)
