@@ -1,0 +1,33 @@
+# Line endings belong to this repository, not to each developer's machine.
+#
+# Without this file, core.autocrlf decides — and two developers with different
+# settings produce whole-file diffs on every save, which makes review and merge
+# impossible. With it, everyone gets the same bytes regardless of their config.
+#
+# The deploy target is a Linux VPS, so LF is the default everywhere.
+
+* text=auto eol=lf
+
+# Windows-only scripts. cmd.exe and PowerShell expect CRLF.
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+*.ps1   text eol=crlf
+
+# Shell scripts MUST be LF. A CRLF .sh fails on Linux with
+#   bad interpreter: /bin/bash^M: No such file or directory
+*.sh    text eol=lf
+
+# Binary files — git must never rewrite a single byte of these.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.webp  binary
+*.svg   text eol=lf
+*.pdf   binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.eot   binary
+*.zip   binary

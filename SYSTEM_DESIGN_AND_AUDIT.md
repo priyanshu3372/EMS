@@ -2,7 +2,7 @@
 
 **Product:** CareerMap Solutions' single-company HR & Payroll system
 **Purpose:** make this product genuinely production-grade and client-delighting, before any multi-tenant/SaaS work is considered
-**Companion docs:** [ROADMAP.md](ROADMAP.md) (strategy) · [.claude/plan.md](.claude/plan.md) (progress tracking — see §2.1, it is unreliable) · [Role_Permission_Documentation.md](Role_Permission_Documentation.md) (intended RBAC)
+**Companion docs:** [ROADMAP.md](ROADMAP.md) (strategy) · [EMS_BUILD_GUIDE.md](EMS_BUILD_GUIDE.md) (current architecture + build plan) · [Role_Permission_Documentation.md](Role_Permission_Documentation.md) (intended RBAC)
 
 ---
 
@@ -76,7 +76,7 @@ What *does* support these findings:
 
 ## 3. What has actually been built
 
-`.claude/plan.md` is inverted in both directions for 5 of 7 modules and should not be trusted; it simultaneously claims the auth guard is restored (§13) and that it still needs restoring (§179). The accurate picture:
+`.claude/plan.md`, the progress tracker this finding was written against, was inverted in both directions for 5 of 7 modules; it simultaneously claimed the auth guard was restored (§13) and that it still needed restoring (§179). It has since been deleted for that reason — `git show 0d3f381:.claude/plan.md` recovers it. The accurate picture at the time of audit:
 
 **Working (against the mock):** 9 pages · 8 TanStack Query hook modules · a split HR/Employee dashboard · a notification panel with a realtime subscription · a profile drawer · a 591-line bank-verification flow · GPS geofencing wired into attendance check-in · an 11-table Postgres schema with CHECK constraints on every enum and correct FK `ON DELETE` choices · RLS enabled on all 11 tables using the correct `SECURITY DEFINER` helper pattern · two edge functions that do server-side authorization properly.
 

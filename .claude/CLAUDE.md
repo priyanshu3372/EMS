@@ -13,7 +13,7 @@ The project is moving **off Supabase onto its own Node backend**. Both halves ex
 | | Status |
 |---|---|
 | `web/` — React app | Working. **Still talks to Supabase.** Cut over module by module |
-| `server/` — Express + Prisma | New. Skeleton only so far |
+| `server/` — Express + Prisma | Platform layer complete. No feature modules yet |
 | `supabase/` | Reference during the migration. Deleted on Day 19 |
 
 **Do not "finish" the Supabase integration.** It is being replaced. Work follows the build guide's day plan.
@@ -21,9 +21,9 @@ The project is moving **off Supabase onto its own Node backend**. Both halves ex
 ### Migration progress
 
 - [x] **Day 1** — workspace split, Express + TypeScript skeleton, error contract, `/health`
-- [ ] Day 2 — Prisma, first migration
-- [ ] Day 3 — platform layer, bootstrap CLI
-- [ ] Days 4–6 — auth (Supabase Auth deleted at the end of Day 6)
+- [x] **Day 2** — Prisma schema (identity / org / people), first migration, tenant conformance test
+- [x] **Day 3** — platform layer (scoped client, transactions, logger, password, storage), bootstrap CLI
+- [ ] **Days 4–6 ← next** — auth (Supabase Auth deleted at the end of Day 6)
 - [ ] Days 7–10 — employees, settings
 - [ ] Days 11–14 — attendance, leave
 - [ ] Days 15–18 — payroll
@@ -109,7 +109,6 @@ Do not hardcode any of these — they live in `OrganizationPolicy` and `PtSlab`.
 
 ## Known-bad references
 
-- **`.claude/plan.md` is unreliable** — its status table is inverted for 5 of 7 modules. Do not trust it; it describes the pre-migration project
 - `SYSTEM_DESIGN_AND_AUDIT.md` §1–6 are valid findings; **§7 is superseded** by the build guide
 - The current `web/` code contains the 438 audited problems. Assume anything you read there is suspect until checked
 
@@ -122,4 +121,6 @@ cd web    && npm run dev        # UI on :5173
 cd server && npm run typecheck  # tsx does NOT type-check
 cd server && npm test
 cd server && npx prisma studio
+
+cd server && npm run bootstrap  # first org + admin. Runs once, refuses after
 ```

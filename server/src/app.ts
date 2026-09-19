@@ -6,6 +6,7 @@ import cookieParser from 'cookie-parser'
 import { env } from './config/env'
 import { requestContext } from './http/middleware/requestContext'
 import { errorHandler, notFound } from './http/middleware/errorHandler'
+import { authRouter } from './http/routes/auth.routes'
 
 /**
  * Assembles the app but does not listen. main.ts owns the port, so tests can
@@ -28,6 +29,8 @@ export function createApp() {
       meta: { requestId: res.locals.requestId },
     })
   })
+
+  app.use('/api/auth', authRouter)
 
   // Express 5 uses path-to-regexp v8: a bare '*' throws at startup.
   app.use('/{*splat}', notFound)

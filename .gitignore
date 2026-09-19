@@ -5,6 +5,9 @@ node_modules/
 dist/
 dist-ssr/
 
+# Local file storage (development only — production uses Cloudflare R2)
+uploads/
+
 # Environment variables
 .env
 .env.local
