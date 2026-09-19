@@ -1,0 +1,27 @@
+/// The company. One row today; the multi-tenant phase adds rows, not columns.
+///
+/// Every tenant-scoped table carries organizationId, and every unique
+/// constraint on those tables includes it. Adding that after go-live is the
+/// single most expensive migration a SaaS product ever does; it costs nothing
+/// now.
+
+model Organization {
+  id String @id @default(uuid())
+
+  name      String
+  legalName String?
+
+  /// Drives the payslip template and how amounts are rendered.
+  /// Statutory calculation is India-only for v1 — see the build guide A1.5.
+  country  String @default("IN")
+  currency String @default("INR")
+
+  /// Every date rule takes this as an argument. Nothing reads the machine clock.
+  timezone String @default("Asia/Kolkata")
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  memberships Membership[]
+  employees   Employee[]
+}

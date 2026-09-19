@@ -12,6 +12,12 @@ const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(4000),
   CORS_ORIGIN: z.url(),
+
+  /// Pooled endpoint — what the running app uses.
+  DATABASE_URL: z.string().startsWith('postgresql://'),
+  /// Unpooled endpoint — Prisma Migrate needs session-level advisory locks,
+  /// which PgBouncer cannot provide.
+  DIRECT_URL: z.string().startsWith('postgresql://'),
 })
 
 const parsed = schema.safeParse(process.env)

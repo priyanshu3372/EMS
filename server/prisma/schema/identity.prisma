@@ -1,0 +1,63 @@
+/// Who someone is, and what they are allowed to be.
+///
+/// User is GLOBAL — one login, one person, regardless of company.
+/// Membership joins a User to an Organization and carries the role.
+/// Employee (people.prisma) is the HR record and is tenant-scoped.
+///
+/// Splitting these three is what makes bootstrap possible (the first admin is
+/// a User with no Employee), stops "remove user" from destroying payslips, and
+/// moves `role` off a row the employee can edit.
+
+enum Role {
+  super_admin
+  admin
+  hr
+  manager
+  rm
+  accounts
+  employee
+}
+
+enum AccountStatus {
+  active
+  inactive
+  invited
+}
+
+model User {
+  id String @id @default(uuid())
+
+  email        String  @unique
+  /// Null means invited but not yet activated — such a user cannot log in.
+  passwordHash String?
+
+  /// Bumped on termination, password change and refresh-token reuse.
+  /// Every access token carries the version it was minted with, so raising
+  /// this invalidates every outstanding token for this user at once.
+  tokenVersion Int @default(0)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  memberships Membership[]
+}
+
+model Membership {
+  id String @id @default(uuid())
+
+  userId         String
+  organizationId String
+
+  role   Role          @default(employee)
+  status AccountStatus @default(invited)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employee     Employee?
+
+  @@unique([userId, organizationId])
+  @@index([organizationId, role])
+}
