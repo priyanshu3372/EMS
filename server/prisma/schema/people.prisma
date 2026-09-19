@@ -1,0 +1,55 @@
+/// The HR record. Tenant-scoped.
+///
+/// Day 7 widens this considerably — financial details, bank account, statutory
+/// identity, department, designation and shift all arrive then, as separate
+/// tables so that row-level rules can hide what column-level rules cannot.
+
+/// How this person's attendance reaches the system. Set per employee by an
+/// admin — the client's example is 8 of 10 staff on `app`, 2 on `biometric`.
+/// Distinct from Attendance.source, which records how one particular row was
+/// created: an `app` employee can still have a day corrected by HR.
+enum AttendanceMode {
+  /// Employee punches in the app. Geofence applies.
+  app
+  /// Comes from the device by CSV import. No geofence — they are at the machine.
+  biometric
+  /// HR marks it.
+  manual
+}
+
+model Employee {
+  id             String  @id @default(uuid())
+  organizationId String
+  /// Set once the person has a login. Null for a record created before that.
+  membershipId   String? @unique
+
+  employeeCode  String
+  fullName      String
+  personalEmail String?
+  phone         String?
+  dateOfJoining DateTime? @db.Date
+
+  attendanceMode AttendanceMode @default(app)
+
+  /// Overrides the organization's values when an employee sits elsewhere.
+  country  String @default("IN")
+  currency String @default("INR")
+
+  /// Self-relation. Without it the DIRECT_REPORTS data scope cannot exist,
+  /// and manager leave approval (Day 14) has nothing to filter on.
+  reportingManagerId String?
+
+  createdAt  DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt  DateTime  @updatedAt @db.Timestamptz(3)
+  /// Soft delete. Statutory records are never destroyed.
+  archivedAt DateTime? @db.Timestamptz(3)
+
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  membership       Membership?  @relation(fields: [membershipId], references: [id], onDelete: SetNull)
+  reportingManager Employee?    @relation("Reports", fields: [reportingManagerId], references: [id], onDelete: SetNull)
+  directReports    Employee[]   @relation("Reports")
+
+  @@unique([organizationId, employeeCode])
+  @@index([organizationId, archivedAt])
+  @@index([reportingManagerId])
+}

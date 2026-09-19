@@ -1,0 +1,13 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  // DATABASE_URL is the pooled Neon endpoint, used by the running app.
+  // DIRECT_URL is the unpooled endpoint — Prisma Migrate needs session-level
+  // advisory locks, which PgBouncer cannot provide, so migrations and studio
+  // must not go through the pooler.
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
