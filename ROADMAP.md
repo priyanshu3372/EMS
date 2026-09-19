@@ -2,7 +2,7 @@
 
 > **Purpose of this document:** bridge between what exists today (the EMS repo — a single-company HR system for CareerMap Solutions) and the long-term vision (the multi-tenant CMS HRMS SaaS platform described in `CMS HRMS Functional Requirements.pdf`).
 >
-> For granular file-by-file implementation tracking, see [.claude/plan.md](.claude/plan.md) — that remains the source of truth for day-to-day progress. This document is the strategic layer above it.
+> For the architecture and the day-by-day build plan, see **[EMS_BUILD_GUIDE.md](EMS_BUILD_GUIDE.md)** — that is the source of truth for all current work. This document is the strategic layer above it.
 >
 > **⚠️ Superseded in part.** A deep technical audit has since found that Phase A below is substantially larger than "finish the wiring": roughly ten core workflows are broken against real Postgres, and there are five independent privilege-escalation paths. See **[SYSTEM_DESIGN_AND_AUDIT.md](SYSTEM_DESIGN_AND_AUDIT.md)** for the verified findings, the target system design, and the P0–P4 work plan. Treat that document as authoritative for Phase A scope; §4 below is retained only as the original outline.
 
@@ -46,7 +46,7 @@ The two phases share almost the entire UI and business logic. The migration in P
 
 ## 4. Phase A — Finish the Single-Company EMS
 
-This is the immediate priority. Order below follows `.claude/plan.md` Phase 3/4, sequenced by dependency and risk.
+Order below is sequenced by dependency and risk.
 
 ### A1. Verify current state
 - `npm install`, run dev server, click through every page against the mock Supabase client to confirm nothing has regressed.
@@ -69,7 +69,7 @@ This is the immediate priority. Order below follows `.claude/plan.md` Phase 3/4,
 - Row Level Security (RLS) policies on every table, matching [Role_Permission_Documentation.md §5](Role_Permission_Documentation.md)
 - Role-based route guards in `App.jsx` / `ProtectedRoute.jsx` (currently front-end nav hides items, but direct-URL access and backend enforcement need to be verified per the doc's testing checklist §10)
 
-### A6. Polish (Phase 4 in plan.md)
+### A6. Polish
 - Error boundaries, empty states, mobile responsive audit
 - Code splitting (fix the recharts chunk-size build warning)
 - Real PDF payslip export (replace `window.print`)
