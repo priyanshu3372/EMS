@@ -17,6 +17,13 @@ export function createApp() {
 
   app.disable('x-powered-by')
 
+  // In production Nginx sits in front, so req.ip would otherwise be the proxy
+  // itself — every visitor sharing one rate-limit bucket. '1' means trust
+  // exactly one hop: our own Nginx, and nothing a client can forge beyond it.
+  if (env.NODE_ENV === 'production') {
+    app.set('trust proxy', 1)
+  }
+
   app.use(helmet())
   app.use(cors({ origin: env.CORS_ORIGIN, credentials: true }))
   app.use(express.json({ limit: '1mb' }))

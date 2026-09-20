@@ -1,5 +1,26 @@
-import 'dotenv/config'
+import dotenv from 'dotenv'
 import { z } from 'zod'
+
+/**
+ * .env holds everything. .env.test then overrides just the database, so the
+ * test suite runs against local Postgres instead of Neon.
+ *
+ * That split matters more than it looks. Tests create and delete rows with
+ * abandon; pointing them at the development database would be merely rude, but
+ * pointing them at production would be a disaster, and the only thing standing
+ * between those two is which URL happens to be loaded. Making the test database
+ * a separate, explicit file means a test run cannot silently inherit whatever
+ * .env was set to.
+ *
+ * It is also the difference between a suite that takes seconds and one that
+ * takes minutes — Neon answers in seconds per query from here, local Postgres
+ * in single-digit milliseconds.
+ */
+dotenv.config()
+
+if (process.env.NODE_ENV === 'test') {
+  dotenv.config({ path: '.env.test', override: true })
+}
 
 /**
  * The ONLY file in this codebase that reads process.env.

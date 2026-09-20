@@ -9,7 +9,7 @@
  */
 
 /** Not owned by any company — identity, and the company record itself. */
-export const GLOBAL_MODELS = ['User', 'Organization'] as const
+export const GLOBAL_MODELS = ['User', 'Organization', 'RefreshToken'] as const
 
 /** Owned by exactly one company. Every row carries organizationId. */
 export const TENANT_MODELS = ['Membership', 'Employee'] as const

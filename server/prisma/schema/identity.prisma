@@ -39,7 +39,8 @@ model User {
   createdAt DateTime @default(now()) @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @db.Timestamptz(3)
 
-  memberships Membership[]
+  memberships   Membership[]
+  refreshTokens RefreshToken[]
 }
 
 model Membership {

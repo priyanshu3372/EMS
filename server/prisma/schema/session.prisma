@@ -1,0 +1,51 @@
+/// One issued refresh token.
+///
+/// GLOBAL, not tenant-scoped, because User is global: a session belongs to a
+/// person, not to a company. Which company they are acting in is carried by the
+/// access token, which is minted fresh on every refresh — so in the SaaS phase
+/// switching company will not require logging in again.
+///
+/// The row exists so that a refresh token can be REVOKED. A bare JWT cannot be:
+/// once signed it is valid until it expires, and there is no way to stop one
+/// that has been stolen. Storing a row per token turns the JWT into a lookup
+/// key against state we control.
+model RefreshToken {
+  id String @id @default(uuid())
+
+  userId String
+
+  /// sha256 of the token that was issued. The raw token is NEVER stored — a
+  /// database dump must not be a folder full of working sessions. Unhashed
+  /// session tokens in a table is the same mistake as unhashed passwords, and
+  /// it is made far more often.
+  tokenHash String @unique
+
+  /// Every token descended from a single login shares this id. Rotation keeps
+  /// the family and issues a new member; presenting a member that has already
+  /// been rotated away means two parties hold tokens from one login, so the
+  /// entire family dies. See auth.session.service.
+  familyId String
+
+  expiresAt DateTime  @db.Timestamptz(3)
+  /// Set when the token is rotated away, logged out, or caught in a reuse.
+  revokedAt DateTime? @db.Timestamptz(3)
+
+  /// The token that replaced this one. Unique because a token can be rotated
+  /// exactly once — a second rotation is the definition of reuse.
+  replacedById String? @unique
+
+  /// Captured at issue time. Not for security decisions — both are trivially
+  /// forged — but so that a reuse incident can be described to the person it
+  /// happened to, and so a future "your sessions" screen has something to show.
+  userAgent String?
+  ip        String?
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+  /// For the expiry sweep. Without it that job scans the whole table.
+  @@index([expiresAt])
+}

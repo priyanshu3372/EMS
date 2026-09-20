@@ -26,3 +26,18 @@ export const loginSchema = z.object({
 })
 
 export type LoginBody = z.infer<typeof loginSchema>
+
+/**
+ * Changing a password.
+ *
+ * The length bounds here mirror platform/auth/password, but the real policy
+ * check stays in the service. Duplicating the rule in two places is how they
+ * drift; this schema only rejects what is obviously not a password, and the
+ * service decides what is acceptable.
+ */
+export const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1, 'Enter your current password').max(200),
+  newPassword: z.string().min(1, 'Enter a new password').max(200),
+})
+
+export type ChangePasswordBody = z.infer<typeof changePasswordSchema>
