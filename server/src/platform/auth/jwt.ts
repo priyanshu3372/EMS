@@ -73,8 +73,13 @@ export interface IssuedRefreshToken {
  * A new family id starts a fresh chain — that is a login. Passing an existing
  * one continues the chain, which is what Day 5's rotation will do.
  */
-export function signRefreshToken(userId: string, familyId = randomUUID()): IssuedRefreshToken {
-  const jti = randomUUID()
+export function signRefreshToken(
+  userId: string,
+  // Annotated as string on purpose: randomUUID() returns a template-literal
+  // type, which would otherwise force every caller to hold a branded uuid.
+  familyId: string = randomUUID(),
+): IssuedRefreshToken {
+  const jti: string = randomUUID()
   const token = jwt.sign({ sub: userId, jti, fam: familyId }, env.JWT_REFRESH_SECRET, {
     expiresIn: env.JWT_REFRESH_EXPIRY as Expiry,
     issuer: ISSUER,

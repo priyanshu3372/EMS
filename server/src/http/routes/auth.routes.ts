@@ -1,13 +1,33 @@
 import { Router } from 'express'
-import { postLogin } from '../controllers/auth.controller'
+import {
+  postLogin,
+  postRefresh,
+  postLogout,
+  getSession,
+  postChangePassword,
+} from '../controllers/auth.controller'
+import { authenticate } from '../middleware/authenticate'
+import { csrfGuard } from '../middleware/csrfGuard'
+import { loginLimiter, authIpLimiter, refreshLimiter } from '../middleware/rateLimit'
 
 /**
- * Mounted at /api/auth — which is also the refresh cookie's Path, so this
+ * Mounted at /api/auth, which is also the refresh cookie's Path — so this
  * router is the only part of the API that ever receives that cookie.
  *
- * Day 5 adds: POST /refresh, POST /logout, GET /session, POST /change-password,
- * and a rate limit across all of them.
+ * Three ways in, and each route uses exactly one:
+ *
+ *   login             nothing; it is how you get a token
+ *   refresh, logout   the cookie, so both need csrfGuard
+ *   session, change   the Authorization header, so neither does
  */
 export const authRouter = Router()
 
-authRouter.post('/login', postLogin)
+authRouter.use(authIpLimiter)
+
+authRouter.post('/login', loginLimiter, postLogin)
+
+authRouter.post('/refresh', refreshLimiter, csrfGuard, postRefresh)
+authRouter.post('/logout', csrfGuard, postLogout)
+
+authRouter.get('/session', authenticate, getSession)
+authRouter.post('/change-password', authenticate, postChangePassword)

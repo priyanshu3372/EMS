@@ -2,6 +2,7 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, it, expect } from 'vitest'
 import { Prisma } from '@prisma/client'
+import { GLOBAL_MODELS, TENANT_MODELS } from './tenantModels'
 
 /**
  * Multi-tenant conformance.
@@ -15,11 +16,10 @@ import { Prisma } from '@prisma/client'
  * unclassified model fails CI rather than slipping through unnoticed.
  */
 
-/** Not owned by any company — identity, and the company record itself. */
-const GLOBAL_MODELS = ['User', 'Organization']
-
-/** Owned by exactly one company. Must carry organizationId. */
-const TENANT_MODELS = ['Membership', 'Employee']
+// The lists come from tenantModels.ts, which is also what scoped.ts reads at
+// runtime. Keeping a second copy here would let the two drift — and the drift
+// that matters is a model this test knows about but the scoping extension does
+// not, which is silently unscoped data.
 
 /**
  * Single-field @unique on a tenant table, deliberately allowed.
@@ -62,13 +62,13 @@ describe('multi-tenant conformance', () => {
     expect(models.map((m) => m.name).sort()).toEqual([...GLOBAL_MODELS, ...TENANT_MODELS].sort())
   })
 
-  it.each(TENANT_MODELS)('%s carries a required organizationId', (name) => {
+  it.each([...TENANT_MODELS])('%s carries a required organizationId', (name) => {
     const field = byName(name).fields.find((f) => f.name === 'organizationId')
     expect(field, `${name} has no organizationId`).toBeDefined()
     expect(field!.isRequired, `${name}.organizationId is optional`).toBe(true)
   })
 
-  it.each(TENANT_MODELS)('%s has no unjustified single-field @unique', (name) => {
+  it.each([...TENANT_MODELS])('%s has no unjustified single-field @unique', (name) => {
     const offenders = byName(name)
       .fields.filter((f) => f.isUnique && !f.isId && f.name !== 'organizationId')
       .map((f) => `${name}.${f.name}`)
@@ -80,7 +80,7 @@ describe('multi-tenant conformance', () => {
     ).toEqual([])
   })
 
-  it.each(TENANT_MODELS)('%s has no compound unique that omits organizationId', (name) => {
+  it.each([...TENANT_MODELS])('%s has no compound unique that omits organizationId', (name) => {
     for (const compound of byName(name).uniqueFields) {
       expect(
         compound,
@@ -89,7 +89,7 @@ describe('multi-tenant conformance', () => {
     }
   })
 
-  it.each(TENANT_MODELS)('%s is indexed on organizationId', (name) => {
+  it.each([...TENANT_MODELS])('%s is indexed on organizationId', (name) => {
     const block = modelBlock(name)
     const hasIndex = /@@index\(\[\s*organizationId/.test(block)
     const hasUnique = /@@unique\(\[\s*organizationId/.test(block)

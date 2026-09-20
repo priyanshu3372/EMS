@@ -98,3 +98,34 @@ export async function findIdentityByEmployeeCode(code: string): Promise<AuthIden
     employee: { id: employee.id, fullName: employee.fullName, employeeCode: employee.employeeCode },
   }
 }
+
+/**
+ * Re-reads an identity by user id. Used on refresh.
+ *
+ * The point of a fifteen-minute access token is that it is rebuilt from current
+ * state, not extended. If someone's role was lowered or their account
+ * deactivated two minutes ago, that has to be reflected the next time they
+ * refresh — so refresh reads this rather than copying claims from the old token.
+ */
+export async function findIdentityByUserId(userId: string): Promise<AuthIdentity | null> {
+  const user = await unsafeDb.user.findUnique({
+    where: { id: userId },
+    include: { memberships: { include: membershipInclude } },
+  })
+
+  const membership = user?.memberships[0]
+  if (!user || !membership) return null
+
+  return {
+    userId: user.id,
+    email: user.email,
+    passwordHash: user.passwordHash,
+    tokenVersion: user.tokenVersion,
+    membershipId: membership.id,
+    organizationId: membership.organizationId,
+    organizationName: membership.organization.name,
+    role: membership.role,
+    status: membership.status,
+    employee: membership.employee,
+  }
+}
