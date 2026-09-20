@@ -9,9 +9,11 @@ dist-ssr/
 uploads/
 
 # Environment variables
-.env
-.env.local
-.env.*.local
+# Deny everything, then allow back the examples. Naming .env, .env.local and
+# .env.*.local individually let .env.test through — and that holds a password too.
+.env*
+!.env.example
+!.env.test.example
 
 # Logs
 logs/

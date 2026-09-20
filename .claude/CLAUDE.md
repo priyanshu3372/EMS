@@ -13,7 +13,7 @@ The project is moving **off Supabase onto its own Node backend**. Both halves ex
 | | Status |
 |---|---|
 | `web/` — React app | Working. **Still talks to Supabase.** Cut over module by module |
-| `server/` — Express + Prisma | Platform layer complete. No feature modules yet |
+| `server/` — Express + Prisma | Auth complete. No business modules yet |
 | `supabase/` | Reference during the migration. Deleted on Day 19 |
 
 **Do not "finish" the Supabase integration.** It is being replaced. Work follows the build guide's day plan.
@@ -23,12 +23,37 @@ The project is moving **off Supabase onto its own Node backend**. Both halves ex
 - [x] **Day 1** — workspace split, Express + TypeScript skeleton, error contract, `/health`
 - [x] **Day 2** — Prisma schema (identity / org / people), first migration, tenant conformance test
 - [x] **Day 3** — platform layer (scoped client, transactions, logger, password, storage), bootstrap CLI
-- [ ] **Days 4–6 ← next** — auth (Supabase Auth deleted at the end of Day 6)
+- [x] **Day 4** — login: email or employee code, access + refresh tokens
+- [x] **Day 5** — sessions: rotation, reuse detection, logout, change-password, rate limits
+- [ ] **Day 6 ← next** — permissions registry + first frontend cutover (Supabase Auth deleted)
 - [ ] Days 7–10 — employees, settings
 - [ ] Days 11–14 — attendance, leave
 - [ ] Days 15–18 — payroll
 - [ ] Day 19 — documents, notifications, reports; **`web/src/lib/supabase.js` deleted**
 - [ ] Day 20 — hardening, deploy
+
+---
+
+## Two databases
+
+| | Where | Used by |
+|---|---|---|
+| Development | **Neon** (`.env`) | `npm run dev`, prisma studio, bootstrap |
+| Test | **local Postgres 17** (`.env.test`) | `npm test` |
+
+`.env.test` is loaded ON TOP of `.env` when `NODE_ENV=test`, so it overrides only
+the two database URLs — secrets stay in `.env` alone.
+
+**The suite refuses to run against a non-localhost database** (`vitest.setup.ts`).
+It deletes rows; that guard is what stops a forgotten `.env.test` from pointing it
+at Neon, or worse.
+
+Why not use Neon for both: measured from here it answers in **~2.5 seconds per
+query**. The same suite takes 283s on Neon and **23s** locally. A test suite nobody
+is willing to wait for stops being run.
+
+New machine: install Postgres 17, create the `ems_test` database, copy
+`.env.test.example` to `.env.test`, then `npm run db:test -- migrate deploy`.
 
 ---
 
@@ -123,4 +148,7 @@ cd server && npm test
 cd server && npx prisma studio
 
 cd server && npm run bootstrap  # first org + admin. Runs once, refuses after
+
+cd server && npm run db:test -- migrate deploy   # migrate the TEST database
+cd server && npm run db:test -- migrate reset    # wipe and rebuild it
 ```
