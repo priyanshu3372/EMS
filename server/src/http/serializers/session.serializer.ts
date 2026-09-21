@@ -1,4 +1,5 @@
 import type { AuthIdentity } from '../../modules/auth/auth.repository'
+import { permissionsFor } from '../../platform/authz/roles'
 
 /**
  * What a session looks like to the client.
@@ -8,12 +9,23 @@ import type { AuthIdentity } from '../../modules/auth/auth.repository'
  * list will grow — a statutory id, a bank reference. An allow-list keeps every
  * one of those out by default; a deny-list leaks each new field once, and only
  * tells you afterwards.
+ *
+ * `permissions` is sent so the UI can hide what the user cannot do. It is a
+ * convenience for the interface and NOTHING MORE — the server re-derives
+ * permissions from the role on every single request and never reads this list
+ * back. A client that edited it would change which buttons it draws for itself,
+ * and nothing else.
+ *
+ * Sending the list rather than the role is the point. If the frontend had only
+ * `role` it would write `role === 'hr'` in fifty components, and the day the
+ * client moves one right between roles, fifty components are wrong.
  */
 export function serializeSessionUser(identity: AuthIdentity) {
   return {
     id: identity.userId,
     email: identity.email,
     role: identity.role,
+    permissions: permissionsFor(identity.role),
     organizationId: identity.organizationId,
     organizationName: identity.organizationName,
     employee: identity.employee

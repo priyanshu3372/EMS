@@ -1,3 +1,4 @@
+import type { AccountStatus, Role } from '@prisma/client'
 import { unsafeDb } from '../../platform/db/unsafe'
 
 /**
@@ -146,4 +147,44 @@ export async function findUserCredentials(
     where: { id: userId },
     select: { id: true, passwordHash: true, tokenVersion: true },
   })
+}
+
+export interface AuthState {
+  userId: string
+  tokenVersion: number
+  role: Role
+  status: AccountStatus
+  employeeId: string | null
+}
+
+/**
+ * Everything the authenticate middleware needs, in ONE query.
+ *
+ * Reading the membership rather than the user is deliberate: it carries the
+ * role and the status, so an account deactivated a minute ago is refused here
+ * rather than at the next refresh. It also reaches the Employee row, which the
+ * access token does not carry — and must not, because an employee record
+ * created after the token was minted would leave the claim stale for fifteen
+ * minutes, exactly when a new joiner is trying to use the system.
+ */
+export async function findAuthState(membershipId: string): Promise<AuthState | null> {
+  const membership = await unsafeDb.membership.findUnique({
+    where: { id: membershipId },
+    select: {
+      role: true,
+      status: true,
+      user: { select: { id: true, tokenVersion: true } },
+      employee: { select: { id: true } },
+    },
+  })
+
+  if (!membership) return null
+
+  return {
+    userId: membership.user.id,
+    tokenVersion: membership.user.tokenVersion,
+    role: membership.role,
+    status: membership.status,
+    employeeId: membership.employee?.id ?? null,
+  }
 }

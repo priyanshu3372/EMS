@@ -4,8 +4,8 @@ import {
   Calendar, UserCheck, KeyRound, Eye, EyeOff, CheckCircle, AlertCircle, Hash,
   Landmark, CheckCircle2, XCircle, Edit3
 } from 'lucide-react'
+import { changePassword } from '../api/auth'
 import { useAuthStore } from '../stores/authStore'
-import { supabase } from '../lib/supabase'
 import { sendNotification } from '../hooks/useNotifications'
 import BankVerificationModal from '../features/payroll/BankVerificationModal'
 
@@ -39,7 +39,7 @@ function getPasswordStrength(password) {
 }
 
 export default function ProfileDrawer() {
-  const { user, profile, role, profileDrawerOpen, setProfileDrawerOpen } = useAuthStore()
+  const { user, profile, role, profileDrawerOpen, setProfileDrawerOpen, setSession } = useAuthStore()
 
   // Form states
   const [currentPassword, setCurrentPassword] = useState('')
@@ -99,8 +99,8 @@ export default function ProfileDrawer() {
       return
     }
 
-    if (!newPassword || newPassword.length < 6) {
-      setToast({ type: 'error', message: 'New password must be at least 6 characters.' })
+    if (!newPassword || newPassword.length < 10) {
+      setToast({ type: 'error', message: 'New password must be at least 10 characters.' })
       return
     }
 
@@ -112,30 +112,32 @@ export default function ProfileDrawer() {
     setLoading(true)
 
     try {
-      let res
-      if (supabase.auth.updateUserPassword) {
-        res = await supabase.auth.updateUserPassword({ currentPassword, newPassword })
-      } else {
-        res = await supabase.auth.updateUser({ password: newPassword })
+      // The old path called supabase.auth.updateUser({ password }), which does
+      // NOT verify the current password — it only needs a valid session. So
+      // anyone at an unlocked laptop could change the password and lock the
+      // owner out. The server endpoint requires the current password, and the
+      // field above was collected and then thrown away.
+      //
+      // It also ends every other session and returns a fresh one, so this tab
+      // stays signed in and any other device is pushed out.
+      const session = await changePassword(currentPassword, newPassword)
+      setSession(session)
+
+      setToast({ type: 'success', message: 'Password updated. Other devices have been signed out.' })
+
+      if (user?.id) {
+        sendNotification({
+          userId: user.id,
+          title: 'Password Changed',
+          message: 'Your account password was updated successfully.',
+          type: 'auth',
+          link: '/dashboard'
+        })
       }
 
-      if (res.error) {
-        setToast({ type: 'error', message: res.error.message || 'Failed to update password.' })
-      } else {
-        setToast({ type: 'success', message: 'Password updated successfully!' })
-        if (user?.id) {
-          sendNotification({
-            userId: user.id,
-            title: 'Password Changed',
-            message: 'Your account password was updated successfully.',
-            type: 'auth',
-            link: '/dashboard'
-          })
-        }
-        setCurrentPassword('')
-        setNewPassword('')
-        setConfirmPassword('')
-      }
+      setCurrentPassword('')
+      setNewPassword('')
+      setConfirmPassword('')
     } catch (err) {
       setToast({ type: 'error', message: err.message || 'An error occurred.' })
     } finally {

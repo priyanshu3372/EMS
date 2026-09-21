@@ -1,0 +1,183 @@
+import { describe, it, expect } from 'vitest'
+import type { Role } from '@prisma/client'
+import { PERMISSIONS, type Permission } from './permissions'
+import { permissionsFor, roleCan } from './roles'
+import { scopeFor } from './scope'
+
+/**
+ * The client's permission matrix, as a test.
+ *
+ * Role_Permission_Documentation.md §3.2 is a table in a Word-style document
+ * that nobody will re-read in three months. Transcribing it here means that
+ * when somebody widens a role — for a good reason, in a hurry, on a Friday —
+ * the build says which line of the client's document they just contradicted.
+ *
+ * Read this as the specification and roles.ts as the implementation. If the two
+ * disagree, the client decides which one is wrong, not us.
+ */
+
+const ROLES: Role[] = ['super_admin', 'admin', 'hr', 'manager', 'rm', 'accounts', 'employee']
+
+/**
+ * §3.2 Action Permissions, transcribed verbatim.
+ * ✅ becomes true, ❌ becomes false. 🟡 (Team) is still true here — the
+ * narrowing to a team is the data scope's job, tested separately below.
+ */
+const MATRIX: Record<string, { permission: Permission; allowed: Role[] }> = {
+  'Create employee': {
+    permission: 'employee:create',
+    allowed: ['super_admin', 'admin', 'hr'],
+  },
+  'Edit employee': {
+    permission: 'employee:update',
+    allowed: ['super_admin', 'admin', 'hr'],
+  },
+  'Delete employee': {
+    permission: 'employee:delete',
+    allowed: ['super_admin'],
+  },
+  'Mark attendance': {
+    permission: 'attendance:mark',
+    allowed: ['super_admin', 'hr'],
+  },
+  'Edit/delete attendance': {
+    permission: 'attendance:update',
+    allowed: ['super_admin', 'hr'],
+  },
+  'Apply for leave': {
+    permission: 'leave:apply',
+    allowed: ['super_admin', 'hr', 'manager', 'rm', 'employee'],
+  },
+  'Approve/reject leave': {
+    permission: 'leave:approve',
+    allowed: ['super_admin', 'hr', 'manager', 'rm'],
+  },
+  'Manage salary structures': {
+    permission: 'payroll:structure:manage',
+    allowed: ['super_admin', 'accounts'],
+  },
+  'Run payroll': {
+    permission: 'payroll:run:create',
+    allowed: ['super_admin', 'accounts'],
+  },
+  'Verify/reject documents': {
+    permission: 'document:verify',
+    allowed: ['super_admin', 'admin', 'hr'],
+  },
+  'View reports': {
+    permission: 'report:read',
+    allowed: ['super_admin'],
+  },
+  'Invite users': {
+    permission: 'user:invite',
+    allowed: ['super_admin'],
+  },
+  'Manage roles/status': {
+    permission: 'membership:role:assign',
+    allowed: ['super_admin'],
+  },
+  'Delete users': {
+    permission: 'user:delete',
+    allowed: ['super_admin'],
+  },
+  'Change settings': {
+    permission: 'settings:update',
+    allowed: ['super_admin'],
+  },
+}
+
+describe('the client permission matrix (Role_Permission_Documentation §3.2)', () => {
+  for (const [action, { permission, allowed }] of Object.entries(MATRIX)) {
+    it(`"${action}" is held by exactly ${allowed.join(', ')}`, () => {
+      const actual = ROLES.filter((role) => roleCan(role, permission))
+      expect(actual.sort()).toEqual([...allowed].sort())
+    })
+  }
+})
+
+describe('registry integrity', () => {
+  it('super_admin holds every permission, enumerated rather than wildcarded', () => {
+    expect([...permissionsFor('super_admin')].sort()).toEqual([...PERMISSIONS].sort())
+  })
+
+  it('every role grants only permissions that exist', () => {
+    const known = new Set<string>(PERMISSIONS)
+    for (const role of ROLES) {
+      const unknown = permissionsFor(role).filter((p) => !known.has(p))
+      expect(unknown, `${role} grants unknown permissions`).toEqual([])
+    }
+  })
+
+  it('no role lists the same permission twice', () => {
+    for (const role of ROLES) {
+      const list = permissionsFor(role)
+      expect(new Set(list).size, `${role} has duplicates`).toBe(list.length)
+    }
+  })
+
+  it('every permission is held by at least one role', () => {
+    // An unreachable permission is dead code pretending to be a security
+    // control, and it reads as if somebody is allowed to do the thing.
+    const orphans = PERMISSIONS.filter((p) => !ROLES.some((r) => roleCan(r, p)))
+    expect(orphans).toEqual([])
+  })
+
+  it('keeps the three compensation reads apart from plain employee reads', () => {
+    // A manager may see the staff directory. A manager may NOT see salaries.
+    // If these ever collapse into one permission, this is what notices.
+    expect(roleCan('manager', 'employee:read')).toBe(true)
+    expect(roleCan('manager', 'employee:compensation:read')).toBe(false)
+    expect(roleCan('manager', 'employee:bank:read')).toBe(false)
+    expect(roleCan('hr', 'employee:compensation:read')).toBe(false)
+  })
+
+  it('does not let the payroll role touch the records payroll is computed from', () => {
+    // Separation of duties: whoever moves the money must not also be able to
+    // adjust the attendance and leave the amount is derived from.
+    expect(roleCan('accounts', 'attendance:mark')).toBe(false)
+    expect(roleCan('accounts', 'attendance:update')).toBe(false)
+    expect(roleCan('accounts', 'leave:approve')).toBe(false)
+  })
+
+  it('gives an ordinary employee nothing that reaches another person', () => {
+    const employeeOnly = permissionsFor('employee')
+    for (const forbidden of [
+      'employee:create',
+      'employee:update',
+      'employee:delete',
+      'attendance:mark',
+      'leave:approve',
+      'payroll:run:create',
+      'report:read',
+      'settings:update',
+      'user:invite',
+    ] as const) {
+      expect(employeeOnly, `employee must not hold ${forbidden}`).not.toContain(forbidden)
+    }
+  })
+})
+
+describe('data scope (§3.1)', () => {
+  it('confines an employee to their own rows everywhere', () => {
+    for (const resource of ['employee', 'attendance', 'leave', 'payslip', 'document'] as const) {
+      expect(scopeFor('employee', resource)).toBe('SELF')
+    }
+  })
+
+  it('gives a manager their team for attendance and leave', () => {
+    expect(scopeFor('manager', 'attendance')).toBe('DIRECT_REPORTS')
+    expect(scopeFor('manager', 'leave')).toBe('DIRECT_REPORTS')
+    expect(scopeFor('rm', 'attendance')).toBe('DIRECT_REPORTS')
+    expect(scopeFor('rm', 'leave')).toBe('DIRECT_REPORTS')
+  })
+
+  it('does not let a manager read the whole company payroll', () => {
+    expect(scopeFor('manager', 'payslip')).toBe('SELF')
+  })
+
+  it('gives super_admin the organization everywhere', () => {
+    for (const resource of ['employee', 'attendance', 'leave', 'payslip', 'document'] as const) {
+      expect(scopeFor('super_admin', resource)).toBe('ORGANIZATION')
+    }
+  })
+})

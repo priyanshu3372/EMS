@@ -1,0 +1,71 @@
+/**
+ * Every permission in the system, named once.
+ *
+ * Code asks `can('payroll:run:create')`, never `role === 'accounts'`. The
+ * difference matters the first time the client says "let HR run payroll too":
+ * with permissions that is one line in roles.ts, and with role checks it is a
+ * hunt through every file for the ones somebody forgot.
+ *
+ * Because this is a union type rather than a list of strings, a typo like
+ * 'payroll:run:crate' fails to compile instead of silently denying access
+ * forever — which is the kind of bug nobody reports, because from the outside
+ * it just looks like the feature does not work for them.
+ *
+ * WHAT versus WHOSE. A permission says what an action is; it does NOT say which
+ * rows it covers. A manager and an employee both hold `leave:read`; what
+ * differs is the data scope (see scope.ts), which decides whether that means
+ * their team's leave or only their own. Splitting the two is what keeps this
+ * list short — the alternative is a separate permission for every combination.
+ */
+export const PERMISSIONS = [
+  'dashboard:read',
+
+  // Employees. The three data-class reads are deliberately separate: salary,
+  // banking and tax identity are held by different roles, and a single
+  // 'employee:read' would hand all three to anyone who could see a name.
+  'employee:read',
+  'employee:create',
+  'employee:update',
+  'employee:delete',
+  'employee:compensation:read',
+  'employee:bank:read',
+  'employee:identity:read',
+
+  // Attendance. `punch` is what an employee does for themselves; `mark` is what
+  // HR does on someone else's behalf, and they are not the same right.
+  'attendance:read',
+  'attendance:punch',
+  'attendance:mark',
+  'attendance:update',
+  'attendance:delete',
+
+  'leave:read',
+  'leave:apply',
+  'leave:approve',
+
+  'payroll:structure:read',
+  'payroll:structure:manage',
+  'payroll:run:create',
+  'payroll:run:approve',
+  'payslip:read',
+
+  'document:read',
+  'document:upload',
+  'document:verify',
+
+  'report:read',
+
+  'settings:read',
+  'settings:update',
+
+  // User management. These four are what the Supabase edge functions currently
+  // do, and nothing else replaces them.
+  'user:invite',
+  'user:status:update',
+  'user:delete',
+  'membership:role:assign',
+] as const
+
+export type Permission = (typeof PERMISSIONS)[number]
+
+export const PERMISSION_SET: ReadonlySet<string> = new Set(PERMISSIONS)

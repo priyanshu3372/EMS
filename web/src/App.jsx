@@ -1,7 +1,9 @@
 import { useEffect } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
-import { supabase } from './lib/supabase'
+import { restoreSession } from './api/auth'
+import { onSessionEnded } from './api/http'
 import { useAuthStore } from './stores/authStore'
+import { ROUTE_PERMISSIONS } from './config/navigation'
 import Layout from './components/Layout'
 import ProtectedRoute from './components/ProtectedRoute'
 import SignIn from './pages/SignIn'
@@ -14,39 +16,37 @@ import Reports from './pages/Reports'
 import Documents from './pages/Documents'
 import Settings from './pages/Settings'
 
-async function fetchAndSetProfile(user, setProfile, setRole) {
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('id', user.id)
-    .single()
-  setProfile(profile ?? null)
-  setRole(profile?.role ?? 'employee')
-}
-
 export default function App() {
-  const { setUser, setProfile, setRole, setLoading, clearAuth } = useAuthStore()
+  const { setSession, clearAuth } = useAuthStore()
 
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (session?.user) {
-        setUser(session.user)
-        await fetchAndSetProfile(session.user, setProfile, setRole)
-      }
-      setLoading(false)
-    })
+    let cancelled = false
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (session?.user) {
-        setUser(session.user)
-        await fetchAndSetProfile(session.user, setProfile, setRole)
-        setLoading(false)
-      } else {
-        clearAuth()
-      }
-    })
+    /**
+     * On boot the access token is gone — it only ever lived in memory — but the
+     * refresh cookie may still be there. One call settles it: a fresh token and
+     * the current user, or a 401 meaning nobody is signed in.
+     *
+     * A failure here is the ordinary "not logged in" path, not an error worth
+     * showing. Anything genuinely wrong surfaces on the next real request.
+     */
+    restoreSession()
+      .then((user) => {
+        if (!cancelled) setSession(user)
+      })
+      .catch(() => {
+        if (!cancelled) clearAuth()
+      })
 
-    return () => subscription.unsubscribe()
+    // Fires when a refresh fails mid-session: the cookie expired, or the
+    // server revoked the family because a token was reused. Either way this
+    // person is no longer signed in, and the guard in Layout sends them out.
+    const stopListening = onSessionEnded(() => clearAuth())
+
+    return () => {
+      cancelled = true
+      stopListening()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -55,33 +55,44 @@ export default function App() {
       <Route path="/signin" element={<SignIn />} />
 
       <Route element={<Layout />}>
-        {/* All authenticated users */}
+        {/* Everyone who is signed in. */}
         <Route path="/dashboard" element={<Dashboard />} />
 
-        {/* HR + Admin + Super Admin + Manager + RM only */}
-        <Route element={<ProtectedRoute allowedRoles={['super_admin', 'admin', 'hr', 'manager', 'rm']} />}>
+        {/*
+          Routes are gated on PERMISSIONS, not role names, and the permission
+          for each path comes from config/navigation.js — the same list the
+          sidebar renders from. One source, so a link can never be visible and
+          unreachable, or hidden and reachable.
+
+          This only decides what is rendered. Every endpoint re-checks on the
+          server, so a user who edits their own permission list in a console
+          gets a page that returns 403 from every call it makes.
+        */}
+        <Route element={<ProtectedRoute permission={ROUTE_PERMISSIONS['/employees']} />}>
           <Route path="/employees" element={<Employees />} />
         </Route>
 
-        {/* All roles — content differs inside each page */}
-        <Route path="/attendance" element={<Attendance />} />
-        <Route path="/leave" element={<Leave />} />
+        <Route element={<ProtectedRoute permission={ROUTE_PERMISSIONS['/attendance']} />}>
+          <Route path="/attendance" element={<Attendance />} />
+        </Route>
 
-        {/* Payroll — super_admin + accounts only */}
-        <Route element={<ProtectedRoute allowedRoles={['super_admin', 'accounts']} />}>
+        <Route element={<ProtectedRoute permission={ROUTE_PERMISSIONS['/leave']} />}>
+          <Route path="/leave" element={<Leave />} />
+        </Route>
+
+        <Route element={<ProtectedRoute permission={ROUTE_PERMISSIONS['/payroll']} />}>
           <Route path="/payroll" element={<Payroll />} />
         </Route>
 
-        {/* Documents — all roles */}
-        <Route path="/documents" element={<Documents />} />
+        <Route element={<ProtectedRoute permission={ROUTE_PERMISSIONS['/documents']} />}>
+          <Route path="/documents" element={<Documents />} />
+        </Route>
 
-        {/* Reports — super_admin only */}
-        <Route element={<ProtectedRoute allowedRoles={['super_admin']} />}>
+        <Route element={<ProtectedRoute permission={ROUTE_PERMISSIONS['/reports']} />}>
           <Route path="/reports" element={<Reports />} />
         </Route>
 
-        {/* Settings — super_admin only */}
-        <Route element={<ProtectedRoute allowedRoles={['super_admin']} />}>
+        <Route element={<ProtectedRoute permission={ROUTE_PERMISSIONS['/settings']} />}>
           <Route path="/settings" element={<Settings />} />
         </Route>
       </Route>

@@ -397,6 +397,36 @@ In now, because each item is also a fix for a shipped bug:
 
 **Deferred:** signup, company switching, platform console, impersonation, billing, branding, SSO.
 
+### `super_admin` is NOT the platform owner
+
+These two get confused because of the word "super". They are different in kind,
+not in degree.
+
+| | `super_admin` | Platform owner |
+|---|---|---|
+| What | The most senior person **inside one company** | Whoever runs the SaaS across **all** companies |
+| Where it lives | `Membership.role` | A flag on `User` — **never a `Role`** |
+| Scope | One organization | No organization, or all of them |
+| Defined in | Role_Permission_Documentation §4.1 | Nothing yet; SaaS phase |
+| Exists today | **Yes**, since Day 3 bootstrap | No |
+
+The reason the platform owner cannot be a `Role` is structural, not stylistic:
+`Membership.organizationId` is REQUIRED, so every role value belongs to exactly
+one company. Someone who operates above all companies has no organization to
+put there. Modelling them as a role would force them to join a company in order
+to administer the platform, which is backwards.
+
+So when the SaaS phase arrives, nothing about `super_admin` changes. It simply
+stops being the only thing at the top — each company keeps its own, and a
+separate mechanism sits above all of them.
+
+**Considered and rejected:** renaming `super_admin` to `platform_admin` and
+promoting `admin` to the top company role. It would contradict the client's own
+§4.1 and §4.2 — where `admin` is deliberately restricted from attendance, leave,
+payroll, reports and settings — and would leave a company owner with no name of
+their own. The confusion it solves is a documentation problem, which this
+section fixes instead.
+
 **What the SaaS phase touches later:** `authenticate.ts`, the role registry, one new module, a signup route calling the existing `bootstrapOrganization()`. **Zero repositories, zero services, zero domain functions, zero migrations, zero frontend call sites.**
 
 ---
