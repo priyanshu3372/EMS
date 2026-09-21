@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
+import { useAuthStore } from '../stores/authStore'
 import { sendNotification } from './useNotifications'
 
 const DEPT_COLORS = {
@@ -98,7 +99,10 @@ export function useApproveLeaveDashboard() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async ({ id, status }) => {
-      const { data: { user } } = await supabase.auth.getUser()
+      // Who is signed in is now our own session, not a Supabase one. The
+      // data queries below still go to Supabase until this module is cut
+      // over on its own day.
+      const { user } = useAuthStore.getState()
 
       const { data: req } = await supabase
         .from('leave_requests')
@@ -140,7 +144,10 @@ export function useMyDashboardStats() {
   return useQuery({
     queryKey: ['my_dashboard', today],
     queryFn: async () => {
-      const { data: { user } } = await supabase.auth.getUser()
+      // Who is signed in is now our own session, not a Supabase one. The
+      // data queries below still go to Supabase until this module is cut
+      // over on its own day.
+      const { user } = useAuthStore.getState()
       if (!user) throw new Error('Not authenticated')
 
       const [

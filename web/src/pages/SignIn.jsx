@@ -1,11 +1,11 @@
 import { useState } from 'react'
 import { Navigate } from 'react-router-dom'
 import { Eye, EyeOff, Lock, Mail, AlertCircle } from 'lucide-react'
-import { supabase } from '../lib/supabase'
+import { login } from '../api/auth'
 import { useAuthStore } from '../stores/authStore'
 
 export default function SignIn() {
-  const { user, loading } = useAuthStore()
+  const { user, loading, setSession } = useAuthStore()
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -13,7 +13,7 @@ export default function SignIn() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
 
-  // Already logged in — send to dashboard (after all hooks)
+  // Already signed in — send them on. After the hooks, never before.
   if (!loading && user) return <Navigate to="/dashboard" replace />
 
   async function handleSignIn(e) {
@@ -21,53 +21,28 @@ export default function SignIn() {
     setError('')
     setSubmitting(true)
 
-    let targetEmail = email.trim()
-    if (!targetEmail.includes('@')) {
-      // It's an Employee ID. Let's resolve it to Email.
-      try {
-        const { data: profile, error: profileError } = await supabase
-          .from('profiles')
-          .select('email')
-          .eq('employee_id', targetEmail)
-          .single()
-
-        if (profileError || !profile?.email) {
-          setError('Employee ID not found.')
-          setSubmitting(false)
-          return
-        }
-        targetEmail = profile.email
-      } catch {
-        setError('Error resolving Employee ID.')
-        setSubmitting(false)
-        return
-      }
-    }
-
-    const { error: authError } = await supabase.auth.signInWithPassword({ email: targetEmail, password })
-
-    if (authError) {
-      setError(authError.message)
+    try {
+      // One field, one request.
+      //
+      // The old version, when the input had no @, queried the profiles table
+      // from the BROWSER to turn an employee code into an email — which meant
+      // the sign-in page could read the staff directory before anyone had
+      // proved who they were. The server resolves it now, behind the password
+      // check, and an unknown code is indistinguishable from a wrong password.
+      const session = await login(email.trim(), password)
+      setSession(session)
+    } catch (err) {
+      setError(err.message)
       setSubmitting(false)
     }
   }
 
-  async function handleForgotPassword() {
-    if (!email) {
-      setError('Enter your email address first.')
-      return
-    }
-    setSubmitting(true)
-    const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/reset-password`,
-    })
-    setSubmitting(false)
-    if (resetError) {
-      setError(resetError.message)
-    } else {
-      setError('')
-      alert('Password reset link sent to ' + email)
-    }
+  function handleForgotPassword() {
+    // Self-service reset arrives with the invite flow on Day 8. Saying so is
+    // better than a button that looks like it worked and sent nothing.
+    setError(
+      'Password reset is not available yet. Ask your administrator to set a new password for you.',
+    )
   }
 
   return (

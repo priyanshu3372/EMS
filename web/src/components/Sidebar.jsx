@@ -1,36 +1,8 @@
 import { NavLink, useNavigate } from 'react-router-dom'
-import {
-  LayoutDashboard, Users, Clock, CalendarDays, Wallet,
-  FileText, BarChart2, Settings, LogOut, ChevronRight,
-} from 'lucide-react'
-import { supabase } from '../lib/supabase'
+import { LogOut, ChevronRight } from 'lucide-react'
+import { logout } from '../api/auth'
+import { NAV_GROUPS } from '../config/navigation'
 import { useAuthStore } from '../stores/authStore'
-
-const NAV = [
-  {
-    label: 'Main',
-    items: [
-      { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', roles: ['super_admin', 'admin', 'hr', 'manager', 'rm', 'accounts', 'employee'] },
-      { to: '/employees', icon: Users, label: 'Employees', roles: ['super_admin', 'admin', 'hr', 'manager', 'rm'] },
-      { to: '/attendance', icon: Clock, label: 'Attendance', roles: ['super_admin', 'hr', 'manager', 'rm', 'employee'] },
-      { to: '/leave', icon: CalendarDays, label: 'Leave', roles: ['super_admin', 'hr', 'manager', 'rm', 'employee'] },
-      { to: '/payroll', icon: Wallet, label: 'Payroll', roles: ['super_admin', 'accounts'] },
-    ],
-  },
-  {
-    label: 'Resources',
-    items: [
-      { to: '/documents', icon: FileText, label: 'Documents', roles: ['super_admin', 'admin', 'hr', 'employee'] },
-      { to: '/reports', icon: BarChart2, label: 'Reports', roles: ['super_admin'] },
-    ],
-  },
-  {
-    label: 'System',
-    items: [
-      { to: '/settings', icon: Settings, label: 'Settings', roles: ['super_admin'] },
-    ],
-  },
-]
 
 const ROLE_LABELS = {
   super_admin: 'Super Admin',
@@ -45,17 +17,23 @@ const ROLE_LABELS = {
 
 export default function Sidebar({ mobile = false, onClose }) {
   const navigate = useNavigate()
-  const { user, profile, role, clearAuth } = useAuthStore()
+  const { user, profile, role, clearAuth, can } = useAuthStore()
 
   async function handleLogout() {
-    await supabase.auth.signOut()
-    clearAuth()
-    navigate('/signin')
+    // Clear locally whichever way the request goes. A network error is not a
+    // reason to leave someone staring at a signed-in screen — and the server
+    // call is what revokes the refresh token, so it is attempted first.
+    try {
+      await logout()
+    } finally {
+      clearAuth()
+      navigate('/signin')
+    }
   }
 
-  const visibleGroups = NAV.map((group) => ({
+  const visibleGroups = NAV_GROUPS.map((group) => ({
     ...group,
-    items: group.items.filter((item) => item.roles.includes(role)),
+    items: group.items.filter((item) => can(item.permission)),
   })).filter((group) => group.items.length > 0)
 
   const displayName = profile?.full_name || user?.email?.split('@')[0] || 'User'

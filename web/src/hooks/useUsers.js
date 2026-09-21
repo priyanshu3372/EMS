@@ -17,21 +17,27 @@ export function useUsers() {
   })
 }
 
+function notYetOnTheNewBackend(action) {
+  // These four actions ran as Supabase edge functions, authenticated with a
+  // Supabase session. That session no longer exists — sign-in is our own now
+  // — so the calls would fail with an unreadable error about a missing token.
+  //
+  // Failing here instead, with a sentence a person can act on. The real
+  // endpoints (POST /users/invite, PUT /memberships/:id/role,
+  // PATCH /users/:id/status, DELETE /users/:id) arrive on Day 8.
+  throw new Error(
+    `${action} is not available yet. User management moves to the new backend on Day 8.`,
+  )
+}
+
 // ─── Invite a new user (calls edge function) ──────────────────────────────────
 
 export function useInviteUser() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async ({ email, full_name, role }) => {
-      const { data: { session } } = await supabase.auth.getSession()
-      const res = await supabase.functions.invoke('invite-user', {
-        body: { email, full_name, role },
-        headers: { Authorization: `Bearer ${session.access_token}` },
-      })
-      if (res.data?.error) throw new Error(res.data.error)
-      if (res.error) throw new Error(res.error.context?.error ?? res.error.message)
-      return res.data
+    mutationFn: async () => {
+      notYetOnTheNewBackend('Inviting a user')
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['users'] }),
   })
@@ -43,15 +49,8 @@ export function useUpdateUserRole() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async ({ user_id, role }) => {
-      const { data: { session } } = await supabase.auth.getSession()
-      const res = await supabase.functions.invoke('manage-user', {
-        body: { action: 'update_role', user_id, role },
-        headers: { Authorization: `Bearer ${session.access_token}` },
-      })
-      if (res.error) throw new Error(res.error.message)
-      if (res.data?.error) throw new Error(res.data.error)
-      return res.data
+    mutationFn: async () => {
+      notYetOnTheNewBackend('Changing a role')
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['users'] }),
   })
@@ -63,16 +62,8 @@ export function useToggleUserStatus() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async ({ user_id, currentStatus }) => {
-      const { data: { session } } = await supabase.auth.getSession()
-      const newStatus = currentStatus === 'active' ? 'inactive' : 'active'
-      const res = await supabase.functions.invoke('manage-user', {
-        body: { action: 'toggle_status', user_id, status: newStatus },
-        headers: { Authorization: `Bearer ${session.access_token}` },
-      })
-      if (res.error) throw new Error(res.error.message)
-      if (res.data?.error) throw new Error(res.data.error)
-      return res.data
+    mutationFn: async () => {
+      notYetOnTheNewBackend('Changing account status')
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['users'] }),
   })
@@ -84,15 +75,8 @@ export function useDeleteUser() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async ({ user_id }) => {
-      const { data: { session } } = await supabase.auth.getSession()
-      const res = await supabase.functions.invoke('manage-user', {
-        body: { action: 'delete_user', user_id },
-        headers: { Authorization: `Bearer ${session.access_token}` },
-      })
-      if (res.error) throw new Error(res.error.message)
-      if (res.data?.error) throw new Error(res.data.error)
-      return res.data
+    mutationFn: async () => {
+      notYetOnTheNewBackend('Deleting a user')
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['users'] }),
   })
