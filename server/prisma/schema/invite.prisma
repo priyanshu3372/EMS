@@ -1,0 +1,39 @@
+/// A single-use token that lets an invited person set their first password.
+///
+/// Invited users are created with `passwordHash = null`, which cannot match any
+/// password — so there is no default credential to guess, and no shared "welcome
+/// password" circulating in a WhatsApp group. This row is the only way in.
+///
+/// Reused by the CSV import on Day 10, which creates the same shape in bulk.
+model PasswordResetToken {
+  id String @id @default(uuid())
+
+  userId String
+
+  /// sha256 of the token, never the token. Same reasoning as RefreshToken: a
+  /// database dump must not be a list of working invitations. See
+  /// platform/auth/tokenHash.
+  tokenHash String @unique
+
+  expiresAt DateTime  @db.Timestamptz(3)
+  /// Set the moment it is spent. A token that has been used is dead even if it
+  /// has not expired — a forwarded invitation email must not work twice.
+  usedAt    DateTime? @db.Timestamptz(3)
+
+  /// Distinguishes the first-password invitation from a later reset, so the
+  /// wording shown to the user is true.
+  purpose PasswordTokenPurpose @default(invite)
+
+  createdByUserId String?
+  createdAt       DateTime @default(now()) @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+enum PasswordTokenPurpose {
+  invite
+  reset
+}

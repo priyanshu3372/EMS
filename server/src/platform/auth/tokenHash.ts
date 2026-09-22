@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 
 /**
  * Hashes a refresh token for storage.
@@ -21,6 +21,23 @@ import { createHash } from 'node:crypto'
  * folder full of working sessions. Storing raw session tokens is the same
  * mistake as storing raw passwords, and it is made far more often.
  */
-export function hashRefreshToken(raw: string): string {
+export function hashToken(raw: string): string {
   return createHash('sha256').update(raw).digest('hex')
+}
+
+/** Refresh tokens. Named separately so call sites say what they are hashing. */
+export const hashRefreshToken = hashToken
+
+/** Invitation and password-reset tokens. Same reasoning, same algorithm. */
+export const hashInviteToken = hashToken
+
+/**
+ * A new opaque token: 32 bytes of randomness, url-safe so it survives being
+ * pasted into an email or a query string.
+ *
+ * Not a JWT. A JWT would be self-validating, which is exactly wrong here — an
+ * invitation must be revocable and single-use, and that requires looking it up.
+ */
+export function generateToken(): string {
+  return randomBytes(32).toString('base64url')
 }
