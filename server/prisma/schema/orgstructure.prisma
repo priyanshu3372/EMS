@@ -1,0 +1,80 @@
+/// The lists an employee record points at: department, designation, shift.
+///
+/// Tables rather than free text on Employee, because the old app stored these
+/// as strings typed into a box. That produces "Sales", "sales" and "Sales "
+/// as three departments, and a headcount report that cannot be trusted.
+
+model Department {
+  id             String @id @default(uuid())
+  organizationId String
+
+  name String
+
+  /// The person who heads it. Optional — a department can exist before anyone
+  /// is appointed to lead it, which is the normal case when setting up.
+  headEmployeeId String?
+
+  createdAt  DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt  DateTime  @updatedAt @db.Timestamptz(3)
+  archivedAt DateTime? @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  head         Employee?    @relation("DepartmentHead", fields: [headEmployeeId], references: [id], onDelete: SetNull)
+  employees    Employee[]
+
+  /// Scoped unique: two companies may both have a "Sales".
+  @@unique([organizationId, name])
+  @@index([organizationId, archivedAt])
+}
+
+model Designation {
+  id             String @id @default(uuid())
+  organizationId String
+
+  name String
+
+  createdAt  DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt  DateTime  @updatedAt @db.Timestamptz(3)
+  archivedAt DateTime? @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employees    Employee[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId, archivedAt])
+}
+
+/// A working pattern. The client asked for configurable shift hours so that
+/// "did they work their day?" has an answer (§A1.5).
+model Shift {
+  id             String @id @default(uuid())
+  organizationId String
+
+  name String
+
+  /// Wall-clock labels in HH:mm, NOT instants.
+  ///
+  /// A shift starts at nine in the morning wherever the employee is; it is not
+  /// a moment in time and has no timezone of its own. Storing these as DateTime
+  /// would attach a date and a zone to something that has neither, and every
+  /// read would need them stripped off again.
+  startTime String
+  endTime   String
+
+  /// Unpaid break, subtracted when hours worked are computed (Day 11).
+  breakMinutes Int @default(60)
+
+  /// What a full day is for this shift. The client's example is 9 hours.
+  /// Decimal because half-hours are real: 8.5 is a common shift.
+  expectedHours Decimal @default(9) @db.Decimal(4, 2)
+
+  createdAt  DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt  DateTime  @updatedAt @db.Timestamptz(3)
+  archivedAt DateTime? @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employees    Employee[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId, archivedAt])
+}
