@@ -64,7 +64,10 @@ const MANAGER: readonly Permission[] = [
   'leave:read',
   'leave:apply',
   'leave:approve',
-  'document:read',
+  // No document access at all: §3.1 marks Documents ❌ for Manager and RM, and
+  // §4.4 repeats it. That leaves a manager with LESS document access than an
+  // ordinary employee, which is unusual enough to be worth asking about —
+  // see OPEN_QUESTIONS below.
 ]
 
 /** The client's matrix gives RM and Manager identical rights. */
@@ -77,7 +80,11 @@ const RM: readonly Permission[] = MANAGER
  */
 const ACCOUNTS: readonly Permission[] = [
   'dashboard:read',
-  'employee:read',
+  // Deliberately NOT employee:read. §3.1 marks the Employees module ❌ for this
+  // role and §4.5 says "No access to: Employees page", while still allowing
+  // "Employee financial data ... within payslip context". So the compensation
+  // and bank reads below are reached through payroll endpoints, never through
+  // the staff directory — which is what keeps finance isolated from people ops.
   'employee:compensation:read',
   'employee:bank:read',
   'payroll:structure:read',
@@ -144,4 +151,5 @@ export function roleCan(role: Role, permission: Permission): boolean {
  */
 export const OPEN_QUESTIONS = [
   'Can an admin or accounts user apply for their own leave? §3.2 currently says no.',
+  'Can a manager or RM see documents at all? §3.1 and §4.4 say no, which leaves them with less access than the people they manage.',
 ] as const

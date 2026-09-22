@@ -181,3 +181,67 @@ describe('data scope (§3.1)', () => {
     }
   })
 })
+
+/**
+ * §3.1 Module Access, transcribed.
+ *
+ * This table was NOT covered when the registry was first written, and two
+ * mistakes got through as a result: Accounts was given the Employees page, and
+ * Manager was given Documents — both marked ❌ in the client's own matrix. It is
+ * here now so the same class of mistake fails the build instead.
+ *
+ * Each module is represented by the permission that opens it. A ✅, a 👁 and a
+ * 🟡 all mean "can open it"; how much they then see is the data scope, tested
+ * separately.
+ */
+const MODULE_ACCESS: Record<string, { permission: Permission; allowed: Role[] }> = {
+  Dashboard: {
+    permission: 'dashboard:read',
+    allowed: ['super_admin', 'admin', 'hr', 'manager', 'rm', 'accounts', 'employee'],
+  },
+  Employees: {
+    permission: 'employee:read',
+    allowed: ['super_admin', 'admin', 'hr', 'manager', 'rm'],
+  },
+  Attendance: {
+    permission: 'attendance:read',
+    allowed: ['super_admin', 'hr', 'manager', 'rm', 'employee'],
+  },
+  Leave: {
+    permission: 'leave:read',
+    allowed: ['super_admin', 'hr', 'manager', 'rm', 'employee'],
+  },
+  Payroll: {
+    permission: 'payroll:structure:read',
+    allowed: ['super_admin', 'accounts'],
+  },
+  Documents: {
+    permission: 'document:read',
+    allowed: ['super_admin', 'admin', 'hr', 'employee'],
+  },
+  Reports: {
+    permission: 'report:read',
+    allowed: ['super_admin'],
+  },
+  Settings: {
+    permission: 'settings:read',
+    allowed: ['super_admin'],
+  },
+}
+
+describe('the client module matrix (Role_Permission_Documentation §3.1)', () => {
+  for (const [module, { permission, allowed }] of Object.entries(MODULE_ACCESS)) {
+    it(`"${module}" opens for exactly ${allowed.join(', ')}`, () => {
+      const actual = ROLES.filter((role) => roleCan(role, permission))
+      expect(actual.sort()).toEqual([...allowed].sort())
+    })
+  }
+
+  it('keeps Accounts out of the staff directory while still paying people', () => {
+    // §4.5: "No access to: Employees page" AND "Can view: Employee financial
+    // data ... within payslip context". Both, simultaneously.
+    expect(roleCan('accounts', 'employee:read')).toBe(false)
+    expect(roleCan('accounts', 'employee:compensation:read')).toBe(true)
+    expect(roleCan('accounts', 'employee:bank:read')).toBe(true)
+  })
+})

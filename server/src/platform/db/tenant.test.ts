@@ -34,6 +34,10 @@ import { GLOBAL_MODELS, TENANT_MODELS } from './tenantModels'
 const ALLOWED_BARE_UNIQUES: Record<string, string> = {
   'Employee.membershipId':
     'FK to Membership, which is itself a uuid owned by one organization — cannot collide across companies',
+  'EmployeeBankAccount.employeeId':
+    'One-to-one with Employee. A uuid FK, so two companies cannot produce the same value; the unique is what enforces one bank account per employee',
+  'EmployeeStatutoryIdentity.employeeId':
+    'One-to-one with Employee, same reasoning as the bank account — a uuid FK, and the constraint is what makes it one-to-one',
 }
 
 const models = Prisma.dmmf.datamodel.models

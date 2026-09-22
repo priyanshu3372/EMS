@@ -12,7 +12,18 @@
 export const GLOBAL_MODELS = ['User', 'Organization', 'RefreshToken'] as const
 
 /** Owned by exactly one company. Every row carries organizationId. */
-export const TENANT_MODELS = ['Membership', 'Employee'] as const
+export const TENANT_MODELS = [
+  'Membership',
+  'Employee',
+  'Department',
+  'Designation',
+  'Shift',
+  'EmployeeFinancial',
+  'EmployeeBankAccount',
+  'EmployeeStatutoryIdentity',
+  'LeaveType',
+  'LeaveLedgerEntry',
+] as const
 
 export const TENANT_MODEL_SET: ReadonlySet<string> = new Set(TENANT_MODELS)
 

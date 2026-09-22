@@ -1,0 +1,182 @@
+import type { Prisma } from '@prisma/client'
+import type { EmployeeRow } from '../../modules/employee/employee.repository'
+import type { FieldAccess } from '../../modules/employee/employee.repository'
+
+/**
+ * What an employee looks like over the wire.
+ *
+ * SNAKE_CASE, deliberately. The pages were written against Supabase and read
+ * `full_name`, `employee_id`, `date_of_joining`. Emitting camelCase would mean
+ * editing every page in the same commit that changes where the data comes
+ * from — two risky changes at once, and no way to tell which one broke a
+ * screen. The v1 contract is snake_case; a rename is its own task, later.
+ *
+ * ALLOW-LIST, always. Every field is named. Nothing is spread, nothing is
+ * deleted. A column added to the Employee table next month does not appear in
+ * an API response until somebody writes it here on purpose.
+ *
+ * The three sensitive blocks are merged in only when the caller holds the
+ * permission — and the repository has not even fetched them otherwise, so
+ * there is nothing here to leak by accident.
+ */
+
+/**
+ * Prisma Decimal to a JSON number.
+ *
+ * The browser gets a number because the pages already do arithmetic on these
+ * values, and a string would break them. That is safe for DISPLAY: salaries
+ * are far below the point where a double loses whole rupees.
+ *
+ * It is not safe for calculation, which is why no calculation happens here.
+ * Payroll arithmetic runs on the server in Decimal, and the browser is shown
+ * the result rather than deriving it. If a screen ever needs to add these up
+ * for anything that matters, that sum belongs in an endpoint.
+ */
+function money(value: Prisma.Decimal | null | undefined): number | null {
+  return value == null ? null : Number(value)
+}
+
+function isoDate(value: Date | null | undefined): string | null {
+  return value ? value.toISOString().slice(0, 10) : null
+}
+
+/** The fields anyone who may read an employee at all can see. */
+function base(employee: EmployeeRow) {
+  return {
+    id: employee.id,
+    employee_id: employee.employeeCode,
+    full_name: employee.fullName,
+
+    // The login address lives on User; the personal one on Employee. They are
+    // different things and the UI shows the work address, so `email` is the
+    // login and `personal_email` is separate rather than one field guessing.
+    email: employee.membership?.user.email ?? null,
+    personal_email: employee.personalEmail,
+    phone: employee.phone,
+
+    department: employee.department?.name ?? null,
+    department_id: employee.departmentId,
+    designation: employee.designation?.name ?? null,
+    designation_id: employee.designationId,
+
+    date_of_joining: isoDate(employee.dateOfJoining),
+    employment_type: employee.employmentType,
+    status: employee.status,
+
+    attendance_mode: employee.attendanceMode,
+    shift_id: employee.shiftId,
+    shift: employee.shift
+      ? {
+          id: employee.shift.id,
+          name: employee.shift.name,
+          start_time: employee.shift.startTime,
+          end_time: employee.shift.endTime,
+          expected_hours: money(employee.shift.expectedHours),
+        }
+      : null,
+
+    country: employee.country,
+    currency: employee.currency,
+
+    reporting_manager_id: employee.reportingManagerId,
+    reporting_manager_name: employee.reportingManager?.fullName ?? null,
+    reporting_manager_designation: employee.reportingManager?.designation?.name ?? null,
+
+    // Access-related, not HR data: whether this person can sign in, and as what.
+    role: employee.membership?.role ?? null,
+    account_status: employee.membership?.status ?? null,
+
+    archived_at: employee.archivedAt?.toISOString() ?? null,
+  }
+}
+
+/** Requires `employee:compensation:read`. */
+function compensation(employee: EmployeeRow) {
+  // financials is an effective-dated list; the repository asked for the current
+  // one only. No current record is null, NOT zero — "we do not know this
+  // person's salary" and "this person earns nothing" are different facts.
+  const current = employee.financials?.[0]
+  if (!current) {
+    return {
+      ctc: null,
+      basic: null,
+      hra: null,
+      da: null,
+      conveyance: null,
+      special_allowance: null,
+      salary_effective_from: null,
+    }
+  }
+
+  return {
+    ctc: money(current.ctc),
+    basic: money(current.basic),
+    hra: money(current.hra),
+    da: money(current.da),
+    conveyance: money(current.conveyance),
+    special_allowance: money(current.specialAllowance),
+    salary_effective_from: isoDate(current.effectiveFrom),
+  }
+}
+
+/** Requires `employee:bank:read`. */
+function bank(employee: EmployeeRow) {
+  const account = employee.bankAccount
+  if (!account) {
+    return {
+      bank_name: null,
+      bank_account_holder_name: null,
+      bank_account: null,
+      ifsc: null,
+      bank_branch: null,
+      bank_account_type: null,
+      bank_verification_status: 'unverified',
+      bank_verification_remarks: null,
+      verified_at: null,
+      bank_proof_name: null,
+    }
+  }
+
+  return {
+    bank_name: account.bankName,
+    bank_account_holder_name: account.accountHolderName,
+    bank_account: account.accountNumber,
+    ifsc: account.ifsc,
+    bank_branch: account.branch,
+    bank_account_type: account.accountType,
+    bank_verification_status: account.verificationStatus,
+    bank_verification_remarks: account.verificationRemarks,
+    verified_at: account.verifiedAt?.toISOString() ?? null,
+    bank_proof_name: account.proofFileName,
+    // Note what is absent: proofKey. The storage key is never sent to a
+    // browser — a download goes through an endpoint that checks permission and
+    // issues a short-lived signed URL (Day 19).
+  }
+}
+
+/** Requires `employee:identity:read`. */
+function identity(employee: EmployeeRow) {
+  const record = employee.statutoryIdentity
+  return {
+    pan: record?.pan ?? null,
+    // Null means EPFO has not issued one. It is NEVER derived from the PAN,
+    // which the old app did — producing a number that looks right and is not.
+    uan: record?.uan ?? null,
+    pf_acc_no: record?.pfAccountNumber ?? null,
+    esi_number: record?.esiNumber ?? null,
+    pt_state: record?.ptState ?? null,
+  }
+}
+
+export function serializeEmployee(employee: EmployeeRow, access: FieldAccess) {
+  return {
+    ...base(employee),
+    ...(access.includeCompensation ? compensation(employee) : {}),
+    ...(access.includeBank ? bank(employee) : {}),
+    ...(access.includeIdentity ? identity(employee) : {}),
+  }
+}
+
+export function serializeEmployees(employees: EmployeeRow[], access: FieldAccess) {
+  return employees.map((employee) => serializeEmployee(employee, access))
+}

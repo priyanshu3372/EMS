@@ -1,8 +1,12 @@
-/// The HR record. Tenant-scoped.
+/// The HR record, and the three tables that hold what must not be read by
+/// everyone who can read a name.
 ///
-/// Day 7 widens this considerably — financial details, bank account, statutory
-/// identity, department, designation and shift all arrive then, as separate
-/// tables so that row-level rules can hide what column-level rules cannot.
+/// Salary, banking and tax identity live in SEPARATE TABLES rather than as more
+/// columns on Employee. That is not tidiness — it is what makes the rule
+/// enforceable. With one wide table, hiding salary means every query everywhere
+/// must remember to omit those columns, and the one that forgets is the leak.
+/// With separate tables the repository simply does not join what the caller may
+/// not see, so the data never reaches the process that would serialise it.
 
 /// How this person's attendance reaches the system. Set per employee by an
 /// admin — the client's example is 8 of 10 staff on `app`, 2 on `biometric`.
@@ -17,6 +21,32 @@ enum AttendanceMode {
   manual
 }
 
+/// The four the existing UI offers. Stored as an enum rather than the display
+/// strings ("Full-time") the old app saved, so a report can group on them.
+enum EmploymentType {
+  full_time
+  part_time
+  contract
+  intern
+}
+
+/// Deliberately only the two states the UI has. Leaving is handled by
+/// `archivedAt` plus the termination transaction in §A9, which keeps payslips
+/// intact — not by inventing enum values nothing sets.
+enum EmployeeStatus {
+  active
+  inactive
+}
+
+/// Set by the bank-verification flow. `unverified` is the honest default: a
+/// blank status is not the same as "checked and fine".
+enum BankVerificationStatus {
+  unverified
+  pending
+  verified
+  rejected
+}
+
 model Employee {
   id             String  @id @default(uuid())
   organizationId String
@@ -28,6 +58,13 @@ model Employee {
   personalEmail String?
   phone         String?
   dateOfJoining DateTime? @db.Date
+
+  employmentType EmploymentType @default(full_time)
+  status         EmployeeStatus @default(active)
+
+  departmentId  String?
+  designationId String?
+  shiftId       String?
 
   attendanceMode AttendanceMode @default(app)
 
@@ -48,8 +85,118 @@ model Employee {
   membership       Membership?  @relation(fields: [membershipId], references: [id], onDelete: SetNull)
   reportingManager Employee?    @relation("Reports", fields: [reportingManagerId], references: [id], onDelete: SetNull)
   directReports    Employee[]   @relation("Reports")
+  department       Department?  @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  designation      Designation? @relation(fields: [designationId], references: [id], onDelete: SetNull)
+  shift            Shift?       @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+
+  headsDepartments Department[] @relation("DepartmentHead")
+
+  financials        EmployeeFinancial[]
+  bankAccount       EmployeeBankAccount?
+  statutoryIdentity EmployeeStatutoryIdentity?
+  leaveLedger       LeaveLedgerEntry[]
 
   @@unique([organizationId, employeeCode])
   @@index([organizationId, archivedAt])
   @@index([reportingManagerId])
+  @@index([organizationId, departmentId])
+}
+
+/// Salary. Requires `employee:compensation:read`.
+///
+/// EFFECTIVE-DATED rather than overwritten, which is why this is a list on
+/// Employee and not one row. A payslip for March must be recomputable from
+/// March's salary, and a raise in April must not silently change what last
+/// month's payslip says. Overwriting is how payroll history becomes fiction.
+model EmployeeFinancial {
+  id             String @id @default(uuid())
+  organizationId String
+  employeeId     String
+
+  /// Decimal, never Float. 0.1 + 0.2 is not 0.3 in binary floating point, and
+  /// money that is out by a paisa per row is money that does not reconcile.
+  ctc              Decimal @db.Decimal(12, 2)
+  basic            Decimal @db.Decimal(12, 2)
+  hra              Decimal @default(0) @db.Decimal(12, 2)
+  da               Decimal @default(0) @db.Decimal(12, 2)
+  /// §A1.5 lists Conveyance as a component the client wants.
+  conveyance       Decimal @default(0) @db.Decimal(12, 2)
+  specialAllowance Decimal @default(0) @db.Decimal(12, 2)
+
+  effectiveFrom DateTime  @db.Date
+  /// Null means "current". Set when a later record supersedes this one.
+  effectiveTo   DateTime? @db.Date
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employee     Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, employeeId, effectiveFrom])
+  @@index([organizationId, employeeId])
+}
+
+/// Where salary is paid. Requires `employee:bank:read`.
+model EmployeeBankAccount {
+  id             String @id @default(uuid())
+  organizationId String
+  employeeId     String @unique
+
+  bankName          String
+  accountHolderName String
+  /// Stored as a string, never a number — leading zeros are significant and an
+  /// integer would silently eat them.
+  accountNumber     String
+  ifsc              String
+  branch            String?
+  accountType       String?
+
+  verificationStatus  BankVerificationStatus @default(unverified)
+  verificationRemarks String?
+  verifiedAt          DateTime?              @db.Timestamptz(3)
+  verifiedByUserId    String?
+
+  /// Cancelled cheque or passbook page. The KEY in object storage, not a URL —
+  /// a stored URL either expires or is public forever.
+  proofKey      String?
+  proofFileName String?
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employee     Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+}
+
+/// Tax and statutory identifiers. Requires `employee:identity:read`.
+///
+/// Separate from banking because they are separate data classes held by
+/// different roles: Accounts needs the bank account to pay someone, and has no
+/// business holding their PAN.
+model EmployeeStatutoryIdentity {
+  id             String @id @default(uuid())
+  organizationId String
+  employeeId     String @unique
+
+  pan             String?
+  /// Universal Account Number. Null until EPFO issues one — and it is NEVER
+  /// derived from anything else. The audit found a screen inventing a UAN from
+  /// the PAN, which produces a plausible-looking number that is simply wrong.
+  uan             String?
+  pfAccountNumber String?
+  esiNumber       String?
+  /// Professional tax is levied per state, and an employee may sit in a
+  /// different state from the head office.
+  ptState         String?
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employee     Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
 }

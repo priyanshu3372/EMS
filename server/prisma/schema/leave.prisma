@@ -1,0 +1,100 @@
+/// Leave types and the ledger that produces a balance.
+///
+/// Models only today, so Day 8's employee writes can reference them. The leave
+/// module itself is Days 13-14.
+
+model LeaveType {
+  id             String @id @default(uuid())
+  organizationId String
+
+  name String
+  /// Short form used in tables and exports: CL, SL, EL, WFH, CO.
+  code String
+
+  /// Days granted per leave year. Decimal because half-days are real.
+  annualQuota Decimal @default(0) @db.Decimal(5, 2)
+
+  /// Unpaid leave still needs a type, so that it can be recorded and shown —
+  /// it simply does not add to the amount payable.
+  isPaid Boolean @default(true)
+
+  /// Whether an unused balance survives into the next leave year, and how much.
+  carryForward    Boolean @default(false)
+  carryForwardCap Decimal @default(0) @db.Decimal(5, 2)
+
+  createdAt  DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt  DateTime  @updatedAt @db.Timestamptz(3)
+  archivedAt DateTime? @db.Timestamptz(3)
+
+  organization  Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  ledgerEntries LeaveLedgerEntry[]
+
+  @@unique([organizationId, code])
+  @@unique([organizationId, name])
+  @@index([organizationId, archivedAt])
+}
+
+/// Every movement in a leave balance, as an append-only list.
+///
+/// A LEDGER, not a balance column. The obvious design is `leave_balances` with
+/// a number that goes up and down — and the old schema did exactly that. The
+/// problem shows up the first time someone asks "why does Priya have 4.5 days
+/// when she should have 6?": a mutated number has no answer. It cannot say what
+/// was granted, what was taken, what was cancelled, or who adjusted it.
+///
+/// Here the balance is the SUM of these rows, so the question always has an
+/// answer, and a wrong balance is fixed by adding a correcting entry rather
+/// than by editing history.
+model LeaveLedgerEntry {
+  id             String @id @default(uuid())
+  organizationId String
+
+  employeeId  String
+  leaveTypeId String
+
+  /// The leave year this belongs to. Which month a leave year starts in is an
+  /// organization setting (Day 9) — this records the year it was applied to,
+  /// not the calendar year of the date.
+  leaveYear Int
+
+  /// Positive grants days, negative consumes them. One column rather than
+  /// separate credit and debit, so a balance is SUM(days) and cannot disagree
+  /// with itself.
+  days Decimal @db.Decimal(5, 2)
+
+  reason LeaveLedgerReason
+
+  /// Set when this entry came from an approved request, so a cancellation can
+  /// find and reverse exactly the right rows.
+  leaveRequestId String?
+
+  /// Free text for a manual adjustment. Required by the service when the
+  /// reason is `adjustment` — an unexplained correction is the thing this
+  /// whole design exists to prevent.
+  note String?
+
+  /// Who caused it. Null for entries the system grants automatically.
+  createdByUserId String?
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employee     Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  leaveType    LeaveType    @relation(fields: [leaveTypeId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, employeeId, leaveYear])
+  @@index([organizationId, leaveTypeId])
+}
+
+enum LeaveLedgerReason {
+  /// The annual quota, granted at the start of a leave year.
+  opening_grant
+  /// Unused days carried in from last year.
+  carry_forward
+  /// An approved leave request.
+  consumed
+  /// A cancelled or reversed request giving days back.
+  reversal
+  /// A manual correction by HR. Requires a note.
+  adjustment
+}

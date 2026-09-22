@@ -24,4 +24,15 @@ model Organization {
 
   memberships Membership[]
   employees   Employee[]
+
+  departments  Department[]
+  designations Designation[]
+  shifts       Shift[]
+
+  employeeFinancials          EmployeeFinancial[]
+  employeeBankAccounts        EmployeeBankAccount[]
+  employeeStatutoryIdentities EmployeeStatutoryIdentity[]
+
+  leaveTypes         LeaveType[]
+  leaveLedgerEntries LeaveLedgerEntry[]
 }
