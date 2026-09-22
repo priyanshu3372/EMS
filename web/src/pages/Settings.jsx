@@ -9,7 +9,12 @@ import {
   useUsers, useUpdateUserRole,
   useToggleUserStatus, useDeleteUser,
 } from '../hooks/useUsers'
-import { getCompanyLocation, saveCompanyLocation } from '../utils/geofence'
+import {
+  useCompanySettings, useSaveCompany,
+  usePayrollSettings, useSavePayroll,
+  useGeofences, useSaveGeofence,
+  useLeaveTypes, useUpdateLeaveType,
+} from '../hooks/useSettings'
 
 // ─── Shared input styles ──────────────────────────────────────────────────────
 
@@ -53,27 +58,53 @@ function Toggle({ checked, onChange }) {
 
 // ─── Company Settings ─────────────────────────────────────────────────────────
 
+const EMPTY_COMPANY = {
+  name: '', legal_name: '', gstin: '', pan: '', address: '',
+  city: '', state: '', pincode: '', phone: '', email: '', website: '',
+  timezone: '', date_format: 'DD/MM/YYYY',
+}
+
+const EMPTY_GEOFENCE = { name: 'Head Office', latitude: '', longitude: '', radiusKm: '' }
+
 function CompanySettings() {
-  const [form, setForm] = useState({
-    name: 'CareerMap Solutions',
-    legal_name: 'CareerMap Solutions Pvt. Ltd.',
-    gstin: '27AABCC1234F1Z5',
-    pan: 'AABCC1234F',
-    address: '5th Floor, Infinity Tower, BKC, Mumbai',
-    city: 'Mumbai',
-    state: 'Maharashtra',
-    pincode: '400051',
-    phone: '+91 22 4567 8900',
-    email: 'hr@careermap.in',
-    website: 'www.careermap.in',
-    fiscal_year: 'April–March',
-    timezone: 'Asia/Kolkata (IST)',
-    date_format: 'DD/MM/YYYY',
-  })
+  // Empty, not invented. The old defaults were a plausible-looking Mumbai
+  // address that had never been entered by anyone — so the form always looked
+  // filled in, and nobody noticed it was never being saved.
+  const { data: company, isLoading } = useCompanySettings()
+  const { data: geofences } = useGeofences()
+  const saveCompany = useSaveCompany()
+  const saveGeofence = useSaveGeofence()
+
   const [saved, setSaved] = useState(false)
 
-  // Geofence configuration state
-  const [geoConfig, setGeoConfig] = useState(getCompanyLocation)
+  /**
+   * Server data until the user types, then their edits.
+   *
+   * Derived during render rather than copied into state by an effect. Copying
+   * causes a second render on every fetch, and — worse — a refetch that lands
+   * mid-edit would overwrite what the user was typing. A null draft means
+   * "nothing edited yet", so the freshest server value always shows.
+   */
+  const [companyDraft, setCompanyDraft] = useState(null)
+  const form = companyDraft ?? { ...EMPTY_COMPANY, ...(company ?? {}) }
+
+  const [geoDraft, setGeoDraft] = useState(null)
+  const office = geofences?.[0]
+  const geoConfig =
+    geoDraft ??
+    (office
+      ? {
+          name: office.name,
+          latitude: office.latitude,
+          longitude: office.longitude,
+          radiusKm: office.radius_km,
+        }
+      : EMPTY_GEOFENCE)
+
+  const setForm = (next) =>
+    setCompanyDraft((prev) => (typeof next === 'function' ? next(prev ?? form) : next))
+  const setGeoConfig = (next) =>
+    setGeoDraft((prev) => (typeof next === 'function' ? next(prev ?? geoConfig) : next))
   const [geoLocating, setGeoLocating] = useState(false)
   const [geoMsg, setGeoMsg] = useState('')
 
@@ -102,11 +133,40 @@ function CompanySettings() {
     )
   }
 
-  function handleSaveAll() {
-    saveCompanyLocation(geoConfig)
+  async function handleSaveAll() {
+    // Only the fields the server accepts. `fiscal_year` was a display string
+    // ("April–March") that belongs to the payroll policy as a month number, so
+    // it is not sent from here.
+    await saveCompany.mutateAsync({
+      name: form.name,
+      legalName: form.legal_name || null,
+      gstin: form.gstin || null,
+      pan: form.pan || null,
+      address: form.address || null,
+      city: form.city || null,
+      state: form.state || null,
+      pincode: form.pincode || null,
+      phone: form.phone || null,
+      email: form.email || null,
+      website: form.website || null,
+      ...(form.date_format ? { dateFormat: form.date_format } : {}),
+    })
+
+    if (geoConfig.latitude !== '' && geoConfig.longitude !== '') {
+      await saveGeofence.mutateAsync({
+        name: geoConfig.name || 'Head Office',
+        latitude: Number(geoConfig.latitude),
+        longitude: Number(geoConfig.longitude),
+        // The form asks for kilometres; the column stores metres.
+        radiusMeters: Math.round(Number(geoConfig.radiusKm || 0.2) * 1000),
+      })
+    }
+
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
   }
+
+  if (isLoading) return <p className="text-sm text-gray-500">Loading company settings…</p>
 
   return (
     <div className="space-y-6">
@@ -479,26 +539,41 @@ const SEED_LEAVE_TYPES = [
 ]
 
 function LeaveSettings() {
-  const [types, setTypes] = useState(SEED_LEAVE_TYPES)
+  const { data: types = [], isLoading } = useLeaveTypes()
+  const updateType = useUpdateLeaveType()
+
   const [editId, setEditId] = useState(null)
   const [editDays, setEditDays] = useState('')
   const [saved, setSaved] = useState(false)
 
   function startEdit(lt) { setEditId(lt.id); setEditDays(String(lt.days)) }
-  function saveEdit(id) {
-    setTypes((t) => t.map((lt) => lt.id === id ? { ...lt, days: Number(editDays) } : lt))
+
+  // Each toggle saves immediately. The old version changed local state and
+  // waited for a Save button that did nothing, so a half-finished edit looked
+  // identical to a saved one.
+  async function saveEdit(id) {
+    await updateType.mutateAsync({ id, annualQuota: Number(editDays) })
     setEditId(null)
   }
 
-  function toggleCarry(id) {
-    setTypes((t) => t.map((lt) => lt.id === id ? { ...lt, carry_forward: !lt.carry_forward } : lt))
+  async function toggleCarry(id) {
+    const lt = types.find((t) => t.id === id)
+    await updateType.mutateAsync({
+      id,
+      carryForward: !lt.carry_forward,
+      // The server refuses carry-forward with a cap of zero, so give it one.
+      ...(!lt.carry_forward && !lt.carry_forward_cap ? { carryForwardCap: lt.days || 30 } : {}),
+    })
   }
 
-  function togglePaid(id) {
-    setTypes((t) => t.map((lt) => lt.id === id ? { ...lt, paid: !lt.paid } : lt))
+  async function togglePaid(id) {
+    const lt = types.find((t) => t.id === id)
+    await updateType.mutateAsync({ id, isPaid: !lt.paid })
   }
 
   function handleSave() { setSaved(true); setTimeout(() => setSaved(false), 2000) }
+
+  if (isLoading) return <p className="text-sm text-gray-500">Loading leave types…</p>
 
   return (
     <div className="space-y-6">
@@ -558,24 +633,35 @@ function LeaveSettings() {
 // ─── Payroll Configuration ────────────────────────────────────────────────────
 
 function PayrollSettings() {
-  const [form, setForm] = useState({
-    pf_employee: 12,
-    pf_employer: 12,
-    esi_employee: 0.75,
-    esi_employer: 3.25,
-    esi_threshold: 21000,
-    pt_state: 'Maharashtra',
-    pt_slab1_limit: 10000,
-    pt_slab1_amount: 0,
-    pt_slab2_limit: 99999,
-    pt_slab2_amount: 200,
-    pay_day: 'Last working day',
-    payslip_lock: true,
-  })
+  const { data: policy, isLoading } = usePayrollSettings()
+  const savePayroll = useSavePayroll()
+
   const [saved, setSaved] = useState(false)
 
+  // Same pattern as the Company tab: derive, do not copy. See the note there.
+  const [draft, setDraft] = useState(null)
+  const form = draft ?? policy ?? {}
+  const setForm = (next) =>
+    setDraft((prev) => (typeof next === 'function' ? next(prev ?? form) : next))
+
   function set(k, v) { setForm((f) => ({ ...f, [k]: v })); setSaved(false) }
-  function handleSave() { setSaved(true); setTimeout(() => setSaved(false), 2000) }
+
+  async function handleSave() {
+    // Numbers, not the strings an input gives back. Sending "12" where a number
+    // is expected is a 422 from the validator, which is better than the old
+    // behaviour of accepting anything and storing nothing.
+    await savePayroll.mutateAsync({
+      pfEmployeeRate: Number(form.pf_employee),
+      pfEmployerRate: Number(form.pf_employer),
+      esiEmployeeRate: Number(form.esi_employee),
+      esiEmployerRate: Number(form.esi_employer),
+      esiThreshold: Number(form.esi_threshold),
+    })
+    setSaved(true)
+    setTimeout(() => setSaved(false), 2000)
+  }
+
+  if (isLoading) return <p className="text-sm text-gray-500">Loading payroll settings…</p>
 
   return (
     <div className="space-y-6">

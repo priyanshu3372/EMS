@@ -11,6 +11,22 @@ model Organization {
   name      String
   legalName String?
 
+  /// The Company tab collects every one of these and the old backend stored
+  /// none of them — the form saved, showed a tick, and discarded the lot.
+  gstin       String?
+  pan         String?
+  addressLine String?
+  city        String?
+  state       String?
+  pincode     String?
+  phone       String?
+  email       String?
+  website     String?
+
+  /// How dates are rendered for this company. A display preference, never a
+  /// storage format — every date is stored as a date and formatted on the way out.
+  dateFormat String @default("DD/MM/YYYY")
+
   /// Drives the payslip template and how amounts are rendered.
   /// Statutory calculation is India-only for v1 — see the build guide A1.5.
   country  String @default("IN")
@@ -35,4 +51,9 @@ model Organization {
 
   leaveTypes         LeaveType[]
   leaveLedgerEntries LeaveLedgerEntry[]
+
+  policies  OrganizationPolicy[]
+  ptSlabs   PtSlab[]
+  holidays  Holiday[]
+  geofences GeofenceLocation[]
 }

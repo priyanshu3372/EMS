@@ -118,6 +118,45 @@ The client's example: 8 of 10 staff on `app`, 2 on `biometric`.
 
 Why both: an `app`-mode employee may still have one day corrected by HR. The mode stays `app`; that row's source is `manual`. A single field cannot express this, and without it nobody can tell who created a record.
 
+### Geofence — 15 to 30 metres, and a hard block
+
+The client wants an employee to be **at the desk, not in the neighbourhood**:
+punch-in is refused outside roughly 15–30 m. This also settles the open question
+in §D3 — it is a **hard block**, not a flag for review.
+
+> **What this costs, stated plainly.** A phone's location is a guess with an
+> error bar, and indoors that error bar is routinely 30–50 m. Against a 20 m
+> fence, a reading of "I am 25 m away, give or take 40" decides nothing: the
+> person could be at their desk or across the road.
+>
+> Allowing those readings means anyone can punch in from the car park. Refusing
+> them means staff at their own desks are locked out on a cloudy morning. Both
+> are wrong, and both would be blamed on the software.
+>
+> So `GeofenceLocation.maxAccuracyMeters` (default 50) sets how vague a reading
+> may be before it is **rejected rather than judged** — the employee is asked to
+> move near a window and try again. The system says "I cannot tell" instead of
+> guessing, which is the only honest answer when the measurement is wider than
+> the thing being measured.
+>
+> **Tell the client this before go-live.** A 15 m fence will produce refusals
+> for people who are genuinely inside. If that becomes a daily complaint, the
+> answer is to widen the fence, not to loosen the accuracy gate — a wider fence
+> is a smaller lie.
+
+### Leave types — configurable by the people who run leave
+
+Confirmed: leave types must be **editable and addable**, not fixed at build time.
+Quotas, carry-forward, paid/unpaid and new types are all set in Settings.
+
+Who may do it was delegated to us. `leave:type:manage` is a **separate
+permission** held by **super_admin, admin and HR**.
+
+Not manager or RM: a manager approves their own team's requests, and one who
+could also raise the quota would be on both sides of that decision. Separate from
+`settings:update` so HR can manage leave **without** also being handed company
+identity, statutory rates and user management.
+
 ### Biometric data entry
 
 Confirmed: the machine can export CSV. **v1 imports biometric attendance by CSV upload** — reusing the import machinery from Day 10. Rows land with `source = biometric`.
@@ -727,6 +766,23 @@ Rewire `useUsers.js` and the Settings → Users tab.
 Employees need permission to update **their own row for today** — the audit found RLS currently blocks exactly this, which is why nobody can check out.
 
 **Delete the "Simulate GPS inside office" button** (`MarkAttendanceModal.jsx:172-179`) and make the geofence **fail closed** on GPS denial.
+
+**Three outcomes, not two.** The fence is 15–30 m (§A1.5), which is tighter than
+a phone can always resolve, so the check has a third answer:
+
+| Reading | Result |
+|---|---|
+| Inside the radius, accuracy within `maxAccuracyMeters` | Punch accepted |
+| Outside the radius, accuracy good | Refused — they are not here |
+| Accuracy worse than `maxAccuracyMeters` | **Neither.** "We cannot confirm your location — move near a window and try again" |
+
+Collapsing the third case into either of the others is the bug: one lets the car
+park through, the other locks out the front desk.
+
+**Also on Day 11:** `MarkAttendanceModal` still reads the geofence from
+`localStorage` (`web/src/utils/geofence.js`). Day 9 moved the real one to the
+server, so until this is cut over an admin can move the office and punch-in will
+not notice.
 
 `GET /dashboard/summary` attendance figures, aggregated in Postgres.
 

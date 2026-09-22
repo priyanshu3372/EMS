@@ -1,0 +1,185 @@
+/// Company configuration: identity, statutory rates, geofence, holidays.
+
+/// The statutory and payroll rules in force over a period of time.
+///
+/// EFFECTIVE-DATED, and this is the single most important thing in the file.
+///
+/// The obvious design is one settings row that gets edited. It is wrong for the
+/// same reason a mutable salary is wrong: March's payslip must be reproducible
+/// from March's rules. If the client raises the PF ceiling in April and the
+/// rates were overwritten, then every payslip already issued silently starts
+/// reporting numbers that were never paid — and the first anyone hears of it is
+/// during an inspection.
+///
+/// So a change writes a NEW row and closes the old one. Nothing is edited,
+/// nothing is lost, and "what were the rates in March?" always has an answer.
+model OrganizationPolicy {
+  id             String @id @default(uuid())
+  organizationId String
+
+  /// PF is applicable per the client (§A1.5). The rate is 12% but MUST be
+  /// editable — they were explicit about that.
+  pfEmployeeRate      Decimal @default(12) @db.Decimal(5, 2)
+  pfEmployerRate      Decimal @default(12) @db.Decimal(5, 2)
+  /// The client wants PF "kept low", which in practice means restricting the
+  /// contribution to the statutory wage ceiling so it caps at ₹1,800/month.
+  /// A flag rather than a hardcoded rule, because it is their choice to make.
+  pfRestrictToCeiling Boolean @default(true)
+  pfWageCeiling       Decimal @default(15000) @db.Decimal(12, 2)
+
+  esiEmployeeRate Decimal @default(0.75) @db.Decimal(5, 2)
+  esiEmployerRate Decimal @default(3.25) @db.Decimal(5, 2)
+  /// Gross at or below this makes an employee ESI-eligible. Eligibility is
+  /// LOCKED for the contribution period once it starts — see guide §A6 — so
+  /// this is tested at the period boundary, not every month.
+  esiThreshold    Decimal @default(21000) @db.Decimal(12, 2)
+
+  /// Day of the month salary is paid.
+  payDay         Int  @default(1)
+  /// After this day of the following month, a payslip can no longer be edited.
+  /// Null means never locked, which is a decision rather than an oversight.
+  payslipLockDay Int?
+
+  /// Which month a leave year begins in. 4 = April, matching the Indian
+  /// financial year; the client may run leave on the calendar year instead.
+  leaveYearStartMonth  Int @default(4)
+  /// Which month the financial year begins in, for reports.
+  fiscalYearStartMonth Int @default(4)
+
+  effectiveFrom DateTime  @db.Date
+  /// Null means "current". Set when a later policy supersedes this one.
+  effectiveTo   DateTime? @db.Date
+
+  createdByUserId String?
+  createdAt       DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime @updatedAt @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, effectiveFrom])
+  @@index([organizationId, effectiveTo])
+}
+
+/// Professional tax, which is levied per STATE and per salary band.
+///
+/// A table rather than two numbers on the policy, because PT is not one rule.
+/// Maharashtra has different amounts for men and women and a February
+/// adjustment; Karnataka has a flat slab; some states do not levy it at all.
+/// An employee may also sit in a different state from the head office, which is
+/// why EmployeeStatutoryIdentity carries its own ptState.
+model PtSlab {
+  id             String @id @default(uuid())
+  organizationId String
+
+  /// Matched against EmployeeStatutoryIdentity.ptState.
+  state String
+
+  /// Inclusive lower bound of monthly gross.
+  minGross Decimal  @db.Decimal(12, 2)
+  /// Null means "and above" — the top slab has no ceiling.
+  maxGross Decimal? @db.Decimal(12, 2)
+
+  amount Decimal @db.Decimal(10, 2)
+
+  /// Some states levy a different amount in one month of the year —
+  /// Maharashtra charges ₹300 in February instead of ₹200.
+  ///
+  /// ZERO means "every month", and it is zero rather than null on purpose.
+  /// Postgres treats NULL as distinct from NULL, so a unique constraint
+  /// containing a nullable column does not actually prevent duplicates — two
+  /// identical every-month slabs would both insert happily. A sentinel value
+  /// makes the constraint do what it says.
+  applicableMonth Int @default(0)
+
+  effectiveFrom DateTime  @db.Date
+  effectiveTo   DateTime? @db.Date
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, state, minGross, effectiveFrom, applicableMonth])
+  @@index([organizationId, state])
+}
+
+model Holiday {
+  id             String @id @default(uuid())
+  organizationId String
+
+  name String
+  /// A calendar day, not an instant — @db.Date, so no timezone can shift it
+  /// across midnight and turn Republic Day into the 25th.
+  date DateTime @db.Date
+
+  type HolidayType @default(public)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, date, name])
+  @@index([organizationId, date])
+}
+
+enum HolidayType {
+  /// Everyone is off.
+  public
+  /// Each employee may choose a limited number.
+  optional
+  /// Weekly off, recorded so reports can distinguish it from absence.
+  weekly_off
+}
+
+/// Where employees may punch in from.
+///
+/// This currently lives in ONE ADMINISTRATOR'S localStorage, which the audit
+/// found: the geofence is invisible to everybody else, vanishes when that
+/// person clears their browser, and is trivially edited from the console by the
+/// very employee it constrains. A server row fixes all three.
+model GeofenceLocation {
+  id             String @id @default(uuid())
+  organizationId String
+
+  name String
+
+  /// Decimal, not Float. A double loses precision in the last decimal places,
+  /// and the last decimal places are metres.
+  latitude  Decimal @db.Decimal(10, 7)
+  longitude Decimal @db.Decimal(10, 7)
+
+  /// Metres, not kilometres. The UI asks for km and converts — storing the
+  /// smaller unit means no fractions and no rounding argument later.
+  ///
+  /// The client wants 15–30 m: an employee must be practically at the desk,
+  /// not merely in the neighbourhood.
+  radiusMeters Int @default(30)
+
+  /// How imprecise a GPS reading may be before it is refused outright.
+  ///
+  /// This exists because of the radius above. A phone reports its own accuracy
+  /// — "I believe I am here, give or take 40 metres" — and against a 30 m fence
+  /// a reading like that decides nothing: the person could be at their desk or
+  /// across the road, and either answer would be a guess.
+  ///
+  /// Guessing has two failure modes and both are bad. Allow it, and anyone can
+  /// punch in from the car park on a cloudy day. Refuse it, and staff sitting
+  /// at their desks are locked out because the building has a metal roof.
+  ///
+  /// So a reading worse than this is neither allowed nor denied — it is
+  /// REJECTED, and the employee is asked to try again near a window. The system
+  /// says "I cannot tell" instead of pretending to know, which is the only
+  /// honest answer when the measurement is wider than the thing being measured.
+  maxAccuracyMeters Int @default(50)
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, name])
+  @@index([organizationId, isActive])
+}

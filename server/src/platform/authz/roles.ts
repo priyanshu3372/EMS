@@ -26,6 +26,7 @@ const ADMIN: readonly Permission[] = [
   'employee:read',
   'employee:create',
   'employee:update',
+  'leave:type:manage',
   'document:read',
   'document:upload',
   'document:verify',
@@ -46,6 +47,7 @@ const HR: readonly Permission[] = [
   'leave:read',
   'leave:apply',
   'leave:approve',
+  'leave:type:manage',
   'document:read',
   'document:upload',
   'document:verify',
@@ -148,6 +150,22 @@ export function roleCan(role: Role, permission: Permission): boolean {
  *
  * Following the document as written until they answer. The fix, if they want
  * one, is to add 'leave:apply' to ADMIN and ACCOUNTS — one line each.
+ */
+/**
+ * WHO MAY CONFIGURE LEAVE — a judgement call the client delegated.
+ *
+ * They asked for leave types to be "flexible", editable by whoever runs leave,
+ * and left the exact roles to us. `leave:type:manage` goes to super_admin,
+ * admin and HR.
+ *
+ * NOT to manager or RM, deliberately. A manager approves their own team's
+ * requests; company-wide quotas and carry-forward rules are a different kind of
+ * decision, and a manager who could raise the quota for the people they also
+ * approve leave for would be on both sides of it.
+ *
+ * It is a SEPARATE permission from settings:update on purpose. Folding it in
+ * would have meant giving HR company identity, statutory rates and user
+ * management in order to let them add one leave type.
  */
 export const OPEN_QUESTIONS = [
   'Can an admin or accounts user apply for their own leave? §3.2 currently says no.',
