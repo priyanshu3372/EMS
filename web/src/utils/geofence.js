@@ -1,4 +1,15 @@
 // ─── Geofence & Location Utility ─────────────────────────────────────────────
+//
+// ⚠️  SUPERSEDED, AND CURRENTLY OUT OF STEP WITH THE SERVER.
+//
+// As of Day 9 the office location is a GeofenceLocation row, saved through
+// Settings → Company and readable at GET /api/settings/geofence. This file
+// still reads localStorage, so an administrator who moves the office will see
+// it saved and MarkAttendanceModal will keep using the old coordinates.
+//
+// Day 11 replaces this: the geofence check moves to the server, where it
+// cannot be edited from a browser console by the employee it constrains.
+// Until then, treat anything here as display-only.
 
 const COMPANY_LOCATION_KEY = 'ems_company_location'
 

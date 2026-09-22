@@ -42,6 +42,11 @@ export const PERMISSIONS = [
   'leave:read',
   'leave:apply',
   'leave:approve',
+  // Configuring leave TYPES — quotas, carry-forward, adding a new kind of
+  // leave. Separate from settings:update because the client wants the people
+  // who run leave to manage it, without also handing them company identity,
+  // statutory rates and user management.
+  'leave:type:manage',
 
   'payroll:structure:read',
   'payroll:structure:manage',

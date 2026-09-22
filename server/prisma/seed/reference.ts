@@ -11,8 +11,6 @@ import { logger } from '../../src/platform/logger'
  * MUST BE IDEMPOTENT. It runs on a fresh database, on a reset, and by hand.
  * Every write is an upsert; running it twice changes nothing.
  *
- * This fills up over the next few days:
- *   Day 9  — holidays, professional-tax slabs
  *
  * Demo data — fake employees for a walkthrough — is deliberately NOT here. It
  * belongs in demo.ts, guarded so it refuses to run against production.
@@ -59,6 +57,93 @@ const LEAVE_TYPES = [
   { code: 'CO', name: 'Comp Off', annualQuota: 0, isPaid: true, carryForward: false },
 ]
 
+
+/**
+ * Maharashtra professional tax.
+ *
+ * Seeded because it is statutory, published, and stable — not a guess. Every
+ * company operating in Maharashtra owes exactly these amounts, so leaving the
+ * table empty would mean payroll silently deducting nothing.
+ *
+ * TWO THINGS THE CLIENT MUST CONFIRM, rather than being assumed here:
+ *
+ *   1. Maharashtra levies a DIFFERENT amount for women (nil up to ₹25,000).
+ *      Employee has no gender field — nobody asked for one — so these slabs
+ *      apply to everybody. If the client employs women in Maharashtra this is
+ *      over-deducting, and it needs a gender field plus gendered slabs.
+ *   2. Other states are NOT seeded. An employee whose ptState is Karnataka
+ *      will match no slab and have no PT deducted, which is visible rather
+ *      than wrong — but it has to be entered before their first payslip.
+ */
+const MAHARASHTRA_PT = [
+  { minGross: 0, maxGross: 7500, amount: 0, applicableMonth: 0 },
+  { minGross: 7500.01, maxGross: 10000, amount: 175, applicableMonth: 0 },
+  // ₹200 for eleven months and ₹300 in February, which is how the state
+  // collects ₹2,500 a year without a fractional monthly amount.
+  { minGross: 10000.01, maxGross: null, amount: 200, applicableMonth: 0 },
+  { minGross: 10000.01, maxGross: null, amount: 300, applicableMonth: 2 },
+]
+
+/**
+ * Only the three fixed-date national holidays.
+ *
+ * Diwali, Holi and Eid move every year with the lunar calendar, and Indian
+ * states each add their own. Seeding a guessed date would put a wrong day in
+ * the leave calendar that looks authoritative — the client enters those.
+ */
+const FIXED_HOLIDAYS = [
+  { name: 'Republic Day', month: 1, day: 26 },
+  { name: 'Independence Day', month: 8, day: 15 },
+  { name: 'Gandhi Jayanti', month: 10, day: 2 },
+]
+
+/** 1 April of the current financial year — when seeded rules take effect. */
+function financialYearStart(): Date {
+  const now = new Date()
+  const year = now.getUTCMonth() + 1 >= 4 ? now.getUTCFullYear() : now.getUTCFullYear() - 1
+  return new Date(Date.UTC(year, 3, 1))
+}
+
+async function seedStatutory(organizationId: string): Promise<void> {
+  const effectiveFrom = financialYearStart()
+
+  for (const slab of MAHARASHTRA_PT) {
+    await prisma.ptSlab.upsert({
+      where: {
+        organizationId_state_minGross_effectiveFrom_applicableMonth: {
+          organizationId,
+          state: 'Maharashtra',
+          minGross: slab.minGross,
+          effectiveFrom,
+          applicableMonth: slab.applicableMonth,
+        },
+      },
+      update: {},
+      create: { organizationId, state: 'Maharashtra', effectiveFrom, ...slab },
+    })
+  }
+
+  const year = new Date().getUTCFullYear()
+  for (const holiday of FIXED_HOLIDAYS) {
+    const date = new Date(Date.UTC(year, holiday.month - 1, holiday.day))
+    await prisma.holiday.upsert({
+      where: { organizationId_date_name: { organizationId, date, name: holiday.name } },
+      update: {},
+      create: { organizationId, name: holiday.name, date, type: 'public' },
+    })
+  }
+
+  // The statutory defaults, so payroll has rates before anyone opens Settings.
+  const existing = await prisma.organizationPolicy.findFirst({
+    where: { organizationId, effectiveTo: null },
+  })
+  if (!existing) {
+    await prisma.organizationPolicy.create({
+      data: { organizationId, effectiveFrom },
+    })
+  }
+}
+
 async function seedForOrganization(organizationId: string): Promise<void> {
   for (const name of DEPARTMENTS) {
     await prisma.department.upsert({
@@ -91,6 +176,8 @@ async function seedForOrganization(organizationId: string): Promise<void> {
       create: { organizationId, ...type },
     })
   }
+
+  await seedStatutory(organizationId)
 }
 
 async function seedReference(): Promise<void> {

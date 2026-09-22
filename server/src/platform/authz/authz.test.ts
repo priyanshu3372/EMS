@@ -245,3 +245,27 @@ describe('the client module matrix (Role_Permission_Documentation §3.1)', () =>
     expect(roleCan('accounts', 'employee:bank:read')).toBe(true)
   })
 })
+
+describe('leave configuration, delegated by the client', () => {
+  it('is held by super_admin, admin and HR — the people who run leave', () => {
+    const actual = ROLES.filter((role) => roleCan(role, 'leave:type:manage'))
+    expect(actual.sort()).toEqual(['admin', 'hr', 'super_admin'])
+  })
+
+  it('is NOT held by a manager who approves the requests', () => {
+    // A manager raising the quota for the same people whose requests they
+    // approve would be on both sides of the decision.
+    expect(roleCan('manager', 'leave:type:manage')).toBe(false)
+    expect(roleCan('rm', 'leave:type:manage')).toBe(false)
+    // They can still approve; only the configuration is out of reach.
+    expect(roleCan('manager', 'leave:approve')).toBe(true)
+  })
+
+  it('does not drag company settings along with it', () => {
+    // The point of a separate permission: HR configures leave without being
+    // handed statutory rates, company identity and user management.
+    expect(roleCan('hr', 'leave:type:manage')).toBe(true)
+    expect(roleCan('hr', 'settings:update')).toBe(false)
+    expect(roleCan('hr', 'user:invite')).toBe(false)
+  })
+})

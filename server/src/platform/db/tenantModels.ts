@@ -23,6 +23,10 @@ export const TENANT_MODELS = [
   'EmployeeStatutoryIdentity',
   'LeaveType',
   'LeaveLedgerEntry',
+  'OrganizationPolicy',
+  'PtSlab',
+  'Holiday',
+  'GeofenceLocation',
 ] as const
 
 export const TENANT_MODEL_SET: ReadonlySet<string> = new Set(TENANT_MODELS)
