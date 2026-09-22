@@ -1,5 +1,10 @@
 import { Router } from 'express'
-import { getEmployees, getEmployeeById } from '../controllers/employee.controller'
+import {
+  getEmployees,
+  getEmployeeById,
+  postEmployee,
+  patchEmployee,
+} from '../controllers/employee.controller'
 import { authenticate } from '../middleware/authenticate'
 import { authorize } from '../middleware/authorize'
 
@@ -11,7 +16,8 @@ import { authorize } from '../middleware/authorize'
  * in the repository. A route guarded here and unscoped there is still an IDOR
  * hole, which is why the repository requires a scope argument to compile.
  *
- * Day 8 adds POST and PATCH here.
+ * POST and PATCH are gated on their own permissions, not on employee:read —
+ * being able to see the directory is not being able to change it.
  */
 export const employeeRouter = Router()
 
@@ -19,3 +25,6 @@ employeeRouter.use(authenticate)
 
 employeeRouter.get('/', authorize('employee:read'), getEmployees)
 employeeRouter.get('/:id', authorize('employee:read'), getEmployeeById)
+
+employeeRouter.post('/', authorize('employee:create'), postEmployee)
+employeeRouter.patch('/:id', authorize('employee:update'), patchEmployee)

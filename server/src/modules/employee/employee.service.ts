@@ -1,9 +1,14 @@
+import type { Role } from '@prisma/client'
 import type { AppContext } from '../../platform/context'
-import { NotFound } from '../../platform/errors/AppError'
+import { NotFound, Conflict, Forbidden } from '../../platform/errors/AppError'
+import { withTransaction } from '../../platform/db/transaction'
+import { logger } from '../../platform/logger'
+import { grantsMoreThan } from '../user/user.policy'
+import { createLoginInTransaction } from '../user/user.service'
 import * as repo from './employee.repository'
 
 /**
- * Employee reads.
+ * Employee reads and writes.
  *
  * The service owns two decisions and delegates everything else: which fields
  * this caller may see, and what "not found" means for them.
@@ -69,6 +74,203 @@ export async function getEmployee(ctx: AppContext, id: string): Promise<Employee
   const row = await repo.findById(ctx.db, ctx.scopeFor('employee'), id, access)
 
   if (!row) throw NotFound('Employee not found')
+
+  return { row, access }
+}
+
+/**
+ * Creating and editing.
+ *
+ * Both run in ONE transaction covering every table they touch, which is what
+ * makes the guide's requirement meaningful: an employee created with a bad
+ * statutory field leaves zero rows, not an employee with no PAN.
+ */
+
+export interface CreateEmployeeInput {
+  employeeCode: string
+  fullName: string
+  personalEmail?: string | null | undefined
+  phone?: string | null | undefined
+  dateOfJoining?: string | null | undefined
+  employmentType?: 'full_time' | 'part_time' | 'contract' | 'intern' | undefined
+  departmentId?: string | null | undefined
+  designationId?: string | null | undefined
+  shiftId?: string | null | undefined
+  reportingManagerId?: string | null | undefined
+  attendanceMode?: 'app' | 'biometric' | 'manual' | undefined
+  country?: string | undefined
+  currency?: string | undefined
+  statutory?:
+    | {
+        pan?: string | null | undefined
+        uan?: string | null | undefined
+        pfAccountNumber?: string | null | undefined
+        esiNumber?: string | null | undefined
+        ptState?: string | null | undefined
+      }
+    | undefined
+  login?: { email: string; role: Role } | undefined
+}
+
+export interface CreateEmployeeResult {
+  row: repo.EmployeeRow
+  access: repo.FieldAccess
+  /** Present only when a login was requested. Shown once, never stored. */
+  invite?: { token: string; expiresAt: Date } | undefined
+}
+
+/** Prisma's code for "a unique constraint was violated". */
+const UNIQUE_VIOLATION = 'P2002'
+
+function asConflict(err: unknown): never {
+  // A duplicate employee code is an ordinary thing for a person to do, not a
+  // server fault. 409 with a readable message rather than a 500.
+  if (typeof err === 'object' && err !== null && 'code' in err && err.code === UNIQUE_VIOLATION) {
+    throw Conflict('An employee with that code already exists')
+  }
+  throw err
+}
+
+export async function createEmployee(
+  ctx: AppContext,
+  input: CreateEmployeeInput,
+): Promise<CreateEmployeeResult> {
+  let invite: { token: string; expiresAt: Date } | undefined
+
+  const employeeId = await withTransaction(ctx.db, async (tx) => {
+    let membershipId: string | null = null
+
+    if (input.login) {
+      // An inviter cannot hand out a role they do not hold — the same rule the
+      // invite endpoint applies, reused rather than restated.
+      if (grantsMoreThan(input.login.role, ctx.role)) {
+        throw Forbidden('You cannot grant a role with more access than your own.')
+      }
+
+      const created = await createLoginInTransaction(tx as never, {
+        email: input.login.email,
+        role: input.login.role,
+        organizationId: ctx.organizationId,
+        invitedByUserId: ctx.userId,
+      })
+
+      membershipId = created.membershipId
+      invite = { token: created.inviteToken, expiresAt: created.expiresAt }
+    }
+
+    const employee = await tx.employee.create({
+      data: {
+        organizationId: ctx.organizationId,
+        membershipId,
+        employeeCode: input.employeeCode.trim(),
+        fullName: input.fullName.trim(),
+        personalEmail: input.personalEmail ?? null,
+        phone: input.phone ?? null,
+        dateOfJoining: input.dateOfJoining ? new Date(input.dateOfJoining) : null,
+        ...(input.employmentType ? { employmentType: input.employmentType } : {}),
+        departmentId: input.departmentId ?? null,
+        designationId: input.designationId ?? null,
+        shiftId: input.shiftId ?? null,
+        reportingManagerId: input.reportingManagerId ?? null,
+        ...(input.attendanceMode ? { attendanceMode: input.attendanceMode } : {}),
+        ...(input.country ? { country: input.country.toUpperCase() } : {}),
+        ...(input.currency ? { currency: input.currency.toUpperCase() } : {}),
+      },
+    })
+
+    if (input.statutory) {
+      await tx.employeeStatutoryIdentity.create({
+        data: {
+          organizationId: ctx.organizationId,
+          employeeId: employee.id,
+          pan: input.statutory.pan ?? null,
+          uan: input.statutory.uan ?? null,
+          pfAccountNumber: input.statutory.pfAccountNumber ?? null,
+          esiNumber: input.statutory.esiNumber ?? null,
+          ptState: input.statutory.ptState ?? null,
+        },
+      })
+    }
+
+    return employee.id
+  }).catch(asConflict)
+
+  const access = accessFor(ctx)
+  const row = await repo.findById(ctx.db, ctx.scopeFor('employee'), employeeId, access)
+  if (!row) throw NotFound('Employee was created but could not be read back')
+
+  logger.info('Employee created', { by: ctx.userId, employeeId, withLogin: Boolean(input.login) })
+
+  return { row, access, invite }
+}
+
+export type UpdateEmployeeInput = Partial<Omit<CreateEmployeeInput, 'login'>>
+
+export async function updateEmployee(
+  ctx: AppContext,
+  id: string,
+  input: UpdateEmployeeInput,
+): Promise<EmployeeResult> {
+  const access = accessFor(ctx)
+  const scope = ctx.scopeFor('employee')
+
+  // Scoped read FIRST. Updating by id alone would let anyone with
+  // employee:update edit an employee they cannot even see — including one in
+  // another company, since an update by primary key carries no company filter.
+  const existing = await repo.findById(ctx.db, scope, id, access)
+  if (!existing) throw NotFound('Employee not found')
+
+  await withTransaction(ctx.db, async (tx) => {
+    const data: Record<string, unknown> = {}
+
+    if (input.employeeCode !== undefined) data.employeeCode = input.employeeCode.trim()
+    if (input.fullName !== undefined) data.fullName = input.fullName.trim()
+    if (input.personalEmail !== undefined) data.personalEmail = input.personalEmail
+    if (input.phone !== undefined) data.phone = input.phone
+    if (input.dateOfJoining !== undefined) {
+      data.dateOfJoining = input.dateOfJoining ? new Date(input.dateOfJoining) : null
+    }
+    if (input.employmentType !== undefined) data.employmentType = input.employmentType
+    if (input.departmentId !== undefined) data.departmentId = input.departmentId
+    if (input.designationId !== undefined) data.designationId = input.designationId
+    if (input.shiftId !== undefined) data.shiftId = input.shiftId
+    if (input.reportingManagerId !== undefined) data.reportingManagerId = input.reportingManagerId
+    if (input.attendanceMode !== undefined) data.attendanceMode = input.attendanceMode
+    if (input.country !== undefined) data.country = input.country?.toUpperCase()
+    if (input.currency !== undefined) data.currency = input.currency?.toUpperCase()
+
+    if (Object.keys(data).length > 0) {
+      await tx.employee.update({ where: { id }, data })
+    }
+
+    if (input.statutory) {
+      const s = input.statutory
+      await tx.employeeStatutoryIdentity.upsert({
+        where: { employeeId: id },
+        update: {
+          ...(s.pan !== undefined ? { pan: s.pan } : {}),
+          ...(s.uan !== undefined ? { uan: s.uan } : {}),
+          ...(s.pfAccountNumber !== undefined ? { pfAccountNumber: s.pfAccountNumber } : {}),
+          ...(s.esiNumber !== undefined ? { esiNumber: s.esiNumber } : {}),
+          ...(s.ptState !== undefined ? { ptState: s.ptState } : {}),
+        },
+        create: {
+          organizationId: ctx.organizationId,
+          employeeId: id,
+          pan: s.pan ?? null,
+          uan: s.uan ?? null,
+          pfAccountNumber: s.pfAccountNumber ?? null,
+          esiNumber: s.esiNumber ?? null,
+          ptState: s.ptState ?? null,
+        },
+      })
+    }
+  }).catch(asConflict)
+
+  const row = await repo.findById(ctx.db, scope, id, access)
+  if (!row) throw NotFound('Employee not found')
+
+  logger.info('Employee updated', { by: ctx.userId, employeeId: id })
 
   return { row, access }
 }

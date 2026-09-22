@@ -1,83 +1,104 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { supabase } from '../lib/supabase'
+import { api } from '../api/http'
 
-// ─── Fetch all users from profiles ────────────────────────────────────────────
+/**
+ * Users and access, now served by our own API.
+ *
+ * These four ran as Supabase edge functions until today. The hook NAMES and
+ * ARGUMENT SHAPES are unchanged on purpose, so Settings → Users did not have to
+ * be rewritten in the same commit that replaced the backend behind it. When
+ * both halves change at once and a screen breaks, there is no way to tell which
+ * half did it.
+ *
+ * ONE THING TO KNOW ABOUT IDS. The `user_id` these mutations take is the
+ * MEMBERSHIP id, not the User id — it is `row.id` from the list below. That is
+ * correct: access is granted per company, so what is being changed is this
+ * person's membership of THIS company, not the person. The awkward name is kept
+ * because the page already passes it; a rename is its own task.
+ */
+
+const KEY = ['users']
 
 export function useUsers() {
   return useQuery({
-    queryKey: ['users'],
+    queryKey: KEY,
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('id, full_name, role, status, created_at')
-        .order('created_at', { ascending: true })
-      if (error) throw error
-      return data ?? []
+      const payload = await api.get('/users')
+      return payload.data
     },
   })
 }
 
-function notYetOnTheNewBackend(action) {
-  // These four actions ran as Supabase edge functions, authenticated with a
-  // Supabase session. That session no longer exists — sign-in is our own now
-  // — so the calls would fail with an unreadable error about a missing token.
-  //
-  // Failing here instead, with a sentence a person can act on. The real
-  // endpoints (POST /users/invite, PUT /memberships/:id/role,
-  // PATCH /users/:id/status, DELETE /users/:id) arrive on Day 8.
-  throw new Error(
-    `${action} is not available yet. User management moves to the new backend on Day 8.`,
-  )
-}
-
-// ─── Invite a new user (calls edge function) ──────────────────────────────────
-
+/**
+ * Invites someone who has no login yet.
+ *
+ * Returns the invitation token. There is no email sending, so whoever invites
+ * has to pass the link on themselves — which is why the token comes back rather
+ * than disappearing into a "check your inbox" message that is not true.
+ *
+ * It can be read exactly once. Only its hash is stored, so a second look means
+ * issuing a new invitation.
+ */
 export function useInviteUser() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async () => {
-      notYetOnTheNewBackend('Inviting a user')
+    mutationFn: async ({ email, full_name, role, employee_code }) => {
+      const payload = await api.post('/users/invite', {
+        email,
+        role,
+        ...(full_name ? { fullName: full_name } : {}),
+        ...(employee_code ? { employeeCode: employee_code } : {}),
+      })
+      return payload.data
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['users'] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: KEY }),
   })
 }
-
-// ─── Update user role (calls edge function) ───────────────────────────────────
 
 export function useUpdateUserRole() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async () => {
-      notYetOnTheNewBackend('Changing a role')
+    mutationFn: async ({ user_id, role }) => {
+      const payload = await api.put(`/users/${user_id}/role`, { role })
+      return payload.data
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['users'] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: KEY }),
   })
 }
-
-// ─── Toggle user status active ↔ inactive (calls edge function) ───────────────
 
 export function useToggleUserStatus() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async () => {
-      notYetOnTheNewBackend('Changing account status')
+    mutationFn: async ({ user_id, currentStatus }) => {
+      // `invited` counts as not-yet-active, so the toggle activates it. The
+      // server still refuses to let anyone set `invited` directly — that is a
+      // state the system assigns, not one an administrator picks.
+      const status = currentStatus === 'active' ? 'inactive' : 'active'
+      const payload = await api.patch(`/users/${user_id}/status`, { status })
+      return payload.data
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['users'] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: KEY }),
   })
 }
 
-// ─── Delete user (calls edge function) ────────────────────────────────────────
-
+/**
+ * Ends someone's access.
+ *
+ * Named delete because the button says Delete, but nothing is deleted. The
+ * server archives the employee and keeps every record attached to them —
+ * payslips and statutory filings reference this person and have to stay
+ * readable for years.
+ */
 export function useDeleteUser() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async () => {
-      notYetOnTheNewBackend('Deleting a user')
+    mutationFn: async ({ user_id }) => {
+      await api.del(`/users/${user_id}`)
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['users'] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: KEY }),
   })
 }

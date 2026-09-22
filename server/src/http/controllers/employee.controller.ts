@@ -1,6 +1,15 @@
 import type { RequestHandler } from 'express'
-import { listEmployees, getEmployee } from '../../modules/employee/employee.service'
+import {
+  listEmployees,
+  getEmployee,
+  createEmployee,
+  updateEmployee,
+} from '../../modules/employee/employee.service'
 import { employeeQuerySchema, employeeIdSchema } from '../validators/employee.validator'
+import {
+  createEmployeeSchema,
+  updateEmployeeSchema,
+} from '../validators/employeeWrite.validator'
 import { parseBody } from '../validators/parse'
 import { serializeEmployee, serializeEmployees } from '../serializers/employee.serializer'
 import { appContext } from '../context'
@@ -53,5 +62,48 @@ export const getEmployeeById: RequestHandler = async (req, res) => {
         identity: access.includeIdentity,
       },
     },
+  })
+}
+
+/**
+ * POST /api/employees
+ *
+ * One transaction, so a request that fails halfway leaves nothing behind.
+ *
+ * The body cannot carry role, status or any salary field — the validator
+ * rejects unknown keys, so a request that tries is a 422 naming the field
+ * rather than a silent partial success. That is what stops anyone with
+ * employee:update from writing themselves a promotion.
+ */
+export const postEmployee: RequestHandler = async (req, res) => {
+  const ctx = appContext(res)
+  const input = parseBody(createEmployeeSchema, req.body)
+
+  const { row, access, invite } = await createEmployee(ctx, input)
+
+  res.status(201).json({
+    data: serializeEmployee(row, access),
+    meta: {
+      requestId: res.locals.requestId,
+      // Shown once. Nothing can retrieve it again, because only its hash is
+      // stored — a second look means issuing a new invitation.
+      ...(invite
+        ? { invite: { token: invite.token, expires_at: invite.expiresAt.toISOString() } }
+        : {}),
+    },
+  })
+}
+
+/** PATCH /api/employees/:id */
+export const patchEmployee: RequestHandler = async (req, res) => {
+  const ctx = appContext(res)
+  const { id } = parseBody(employeeIdSchema, req.params)
+  const input = parseBody(updateEmployeeSchema, req.body)
+
+  const { row, access } = await updateEmployee(ctx, id, input)
+
+  res.status(200).json({
+    data: serializeEmployee(row, access),
+    meta: { requestId: res.locals.requestId },
   })
 }

@@ -13,7 +13,7 @@ The project is moving **off Supabase onto its own Node backend**. Both halves ex
 | | Status |
 |---|---|
 | `web/` — React app | Working. **Still talks to Supabase.** Cut over module by module |
-| `server/` — Express + Prisma | Auth complete. No business modules yet |
+| `server/` — Express + Prisma | Auth, employees and user management complete |
 | `supabase/` | Reference during the migration. Deleted on Day 19 |
 
 **Do not "finish" the Supabase integration.** It is being replaced. Work follows the build guide's day plan.
@@ -25,8 +25,10 @@ The project is moving **off Supabase onto its own Node backend**. Both halves ex
 - [x] **Day 3** — platform layer (scoped client, transactions, logger, password, storage), bootstrap CLI
 - [x] **Day 4** — login: email or employee code, access + refresh tokens
 - [x] **Day 5** — sessions: rotation, reuse detection, logout, change-password, rate limits
-- [ ] **Day 6 ← next** — permissions registry + first frontend cutover (Supabase Auth deleted)
-- [ ] Days 7–10 — employees, settings
+- [x] **Day 6** — permissions registry, data scopes, frontend auth cutover (Supabase Auth deleted)
+- [x] **Day 7** — employee reads, scoped + field-level permissions, field contract
+- [x] **Day 8** — employee writes, invitations, role/status/termination
+- [ ] **Days 9–10 ← next** — settings, master data, CSV import
 - [ ] Days 11–14 — attendance, leave
 - [ ] Days 15–18 — payroll
 - [ ] Day 19 — documents, notifications, reports; **`web/src/lib/supabase.js` deleted**
