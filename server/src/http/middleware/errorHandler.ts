@@ -39,6 +39,21 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
     return
   }
 
+  // body-parser rejects an oversized body before any route sees it, and that
+  // is not a server fault — it is a person uploading something too big. A 500
+  // here would read as "the system broke" for what is really "that file is
+  // too large", and would be investigated as an outage.
+  if (typeof err === 'object' && err !== null && 'type' in err && err.type === 'entity.too.large') {
+    res.status(413).json({
+      error: {
+        code: 'PAYLOAD_TOO_LARGE',
+        message: 'That upload is too large.',
+        requestId,
+      },
+    })
+    return
+  }
+
   // Anything reaching here is a bug. Log everything, tell the client nothing.
   console.error({ requestId, err })
 

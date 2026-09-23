@@ -29,7 +29,15 @@ export function createApp() {
 
   app.use(helmet())
   app.use(cors({ origin: env.CORS_ORIGIN, credentials: true }))
-  app.use(express.json({ limit: '1mb' }))
+  // 1 MB everywhere, except the CSV import — a 1 MB roster becomes larger
+  // than 1 MB once it is a JSON string, because quotes and newlines are
+  // escaped. That route parses its own body at 2 MB and enforces the real
+  // limit on the DECODED csv, where the number means what the person
+  // uploading thinks it means.
+  const parseJson = express.json({ limit: '1mb' })
+  app.use((req, res, next) =>
+    req.path === '/api/employees/import' ? next() : parseJson(req, res, next),
+  )
   app.use(cookieParser())
   app.use(requestContext)
 
