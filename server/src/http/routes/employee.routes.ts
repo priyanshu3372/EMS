@@ -1,4 +1,4 @@
-import { Router } from 'express'
+import { Router, json } from 'express'
 import {
   getEmployees,
   getEmployeeById,
@@ -7,6 +7,7 @@ import {
 } from '../controllers/employee.controller'
 import { authenticate } from '../middleware/authenticate'
 import { authorize } from '../middleware/authorize'
+import { postImport } from '../controllers/employeeImport.controller'
 
 /**
  * Mounted at /api/employees.
@@ -27,4 +28,15 @@ employeeRouter.get('/', authorize('employee:read'), getEmployees)
 employeeRouter.get('/:id', authorize('employee:read'), getEmployeeById)
 
 employeeRouter.post('/', authorize('employee:create'), postEmployee)
+
+// A 1 MB CSV becomes more than 1 MB once it is a JSON string — quotes and
+// newlines are escaped — so this route gets its own limit. The real cap is
+// enforced on the decoded CSV in the service, where the number means what
+// the person uploading thinks it means.
+employeeRouter.post(
+  '/import',
+  json({ limit: '2mb' }),
+  authorize('employee:create'),
+  postImport,
+)
 employeeRouter.patch('/:id', authorize('employee:update'), patchEmployee)
