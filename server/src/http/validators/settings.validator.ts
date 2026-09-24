@@ -67,6 +67,18 @@ export const policySchema = z
     // exist in February, and the bug only appears once a year.
     payslipLockDay: z.number().int().min(1).max(28).nullish(),
 
+    /**
+     * Which weekdays the company does not work, as Sunday=0.
+     *
+     * [0] is a six-day week with Sunday off; [0, 6] is the five-day week.
+     * Capped at six so a company cannot accidentally close every day and
+     * make leave impossible to take.
+     */
+    weeklyOffDays: z
+      .array(z.number().int().min(0).max(6))
+      .max(6, 'A company cannot be closed every day of the week')
+      .optional(),
+
     leaveYearStartMonth: z.number().int().min(1).max(12).optional(),
     fiscalYearStartMonth: z.number().int().min(1).max(12).optional(),
   })

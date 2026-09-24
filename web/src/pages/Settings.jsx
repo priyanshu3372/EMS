@@ -9,6 +9,8 @@ import {
   useUsers, useUpdateUserRole,
   useToggleUserStatus, useDeleteUser,
 } from '../hooks/useUsers'
+import WeeklyOffPicker from '../features/settings/WeeklyOffPicker'
+import { useAuthStore } from '../stores/authStore'
 import {
   useCompanySettings, useSaveCompany,
   usePayrollSettings, useSavePayroll,
@@ -540,6 +542,7 @@ const SEED_LEAVE_TYPES = [
 
 function LeaveSettings() {
   const { data: types = [], isLoading } = useLeaveTypes()
+  const canEditSettings = useAuthStore((state) => state.can('settings:update'))
   const updateType = useUpdateLeaveType()
 
   const [editId, setEditId] = useState(null)
@@ -577,6 +580,21 @@ function LeaveSettings() {
 
   return (
     <div className="space-y-6">
+      {/*
+        Working days first, because everything below depends on it: a quota of
+        twelve days means something different in a five-day week than a six-day
+        one.
+
+        Shown only to somebody who can change it. HR manages leave TYPES but not
+        company settings, and rendering a section that 403s on load would look
+        like a broken page rather than a permission they do not have.
+      */}
+      {canEditSettings && (
+        <Section title="Working Days" desc="Which days the company is closed. Leave is not charged for these.">
+          <WeeklyOffPicker />
+        </Section>
+      )}
+
       <Section title="Leave Types" desc="Configure leave quotas, carry-forward rules and eligibility.">
         <div className="border border-gray-200 rounded-xl overflow-hidden">
           <table className="w-full min-w-[600px]">

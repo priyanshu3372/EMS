@@ -28,6 +28,7 @@ model LeaveType {
 
   organization  Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   ledgerEntries LeaveLedgerEntry[]
+  requests      LeaveRequest[]
 
   @@unique([organizationId, code])
   @@unique([organizationId, name])
@@ -78,9 +79,10 @@ model LeaveLedgerEntry {
 
   createdAt DateTime @default(now()) @db.Timestamptz(3)
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  employee     Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  leaveType    LeaveType    @relation(fields: [leaveTypeId], references: [id], onDelete: Restrict)
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employee     Employee      @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  leaveType    LeaveType     @relation(fields: [leaveTypeId], references: [id], onDelete: Restrict)
+  leaveRequest LeaveRequest? @relation(fields: [leaveRequestId], references: [id], onDelete: SetNull)
 
   @@index([organizationId, employeeId, leaveYear])
   @@index([organizationId, leaveTypeId])
@@ -97,4 +99,71 @@ enum LeaveLedgerReason {
   reversal
   /// A manual correction by HR. Requires a note.
   adjustment
+}
+
+/// One application for leave.
+///
+/// The REQUEST and the LEDGER are separate on purpose. This row is what
+/// somebody asked for and what was decided; the ledger is what it cost them.
+/// Keeping them apart is what makes a cancellation possible: the request moves
+/// to `cancelled` and a reversing entry gives the days back, and both facts
+/// survive. A single mutable "days remaining" number can express neither.
+model LeaveRequest {
+  id             String @id @default(uuid())
+  organizationId String
+
+  employeeId  String
+  leaveTypeId String
+
+  fromDate DateTime @db.Date
+  toDate   DateTime @db.Date
+
+  /// Which days inside the range are half days, as calendar dates.
+  ///
+  /// An array rather than a `isHalfDay` flag, because a week's leave can have a
+  /// half day at either end — somebody leaving at lunch on Friday and returning
+  /// at lunch the following Thursday. A single boolean cannot say which.
+  halfDayDates String[] @default([])
+
+  /// What this actually costs, computed by domain/leave/leaveDays — weekends
+  /// and holidays already removed. Stored rather than recomputed, so a holiday
+  /// added to the calendar next year does not silently change what somebody was
+  /// charged last year.
+  days Decimal @db.Decimal(5, 2)
+
+  /// The leave year this is charged against, from OrganizationPolicy. Stored
+  /// because the year boundary can move, and a request must stay in the year it
+  /// was taken from.
+  leaveYear Int
+
+  reason String
+
+  status LeaveStatus @default(pending)
+
+  appliedAt        DateTime  @default(now()) @db.Timestamptz(3)
+  reviewedByUserId String?
+  reviewedAt       DateTime? @db.Timestamptz(3)
+  reviewNote       String?
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employee     Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  leaveType    LeaveType    @relation(fields: [leaveTypeId], references: [id], onDelete: Restrict)
+
+  ledgerEntries LeaveLedgerEntry[]
+
+  @@index([organizationId, employeeId, leaveYear])
+  @@index([organizationId, status])
+  @@index([organizationId, fromDate])
+}
+
+enum LeaveStatus {
+  pending
+  approved
+  rejected
+  /// Withdrawn by the employee, or reversed after approval. Either way the
+  /// days come back through a ledger entry rather than by editing history.
+  cancelled
 }
