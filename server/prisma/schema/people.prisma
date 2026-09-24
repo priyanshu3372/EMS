@@ -96,6 +96,7 @@ model Employee {
   statutoryIdentity EmployeeStatutoryIdentity?
   leaveLedger       LeaveLedgerEntry[]
   attendance        Attendance[]
+  leaveRequests     LeaveRequest[]
 
   @@unique([organizationId, employeeCode])
   @@index([organizationId, archivedAt])

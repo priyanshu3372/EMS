@@ -57,5 +57,6 @@ model Organization {
   holidays  Holiday[]
   geofences GeofenceLocation[]
 
-  attendance Attendance[]
+  attendance    Attendance[]
+  leaveRequests LeaveRequest[]
 }

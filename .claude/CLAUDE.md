@@ -32,7 +32,8 @@ The project is moving **off Supabase onto its own Node backend**. Both halves ex
 - [x] **Day 10** — CSV roster import with dry-run preview
 - [x] **Day 11** — attendance punch flow, server-side geofence, domain layer
 - [x] **Day 12** — attendance views, monthly hours, biometric import
-- [ ] **Days 13–14 ← next** — leave
+- [x] **Day 13** — leave requests, working-day counting, ledger backfill
+- [ ] **Day 14 ← next** — leave approval + dashboard
 - [ ] Days 15–18 — payroll
 - [ ] Day 19 — documents, notifications, reports; **`web/src/lib/supabase.js` deleted**
 - [ ] Day 20 — hardening, deploy

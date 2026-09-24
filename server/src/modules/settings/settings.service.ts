@@ -79,6 +79,7 @@ export interface PolicyInput {
   esiThreshold?: number | undefined
   payDay?: number | undefined
   payslipLockDay?: number | null | undefined
+  weeklyOffDays?: number[] | undefined
   leaveYearStartMonth?: number | undefined
   fiscalYearStartMonth?: number | undefined
 }
@@ -178,6 +179,7 @@ export async function updatePolicy(ctx: AppContext, input: PolicyInput) {
         esiThreshold: current.esiThreshold,
         payDay: current.payDay,
         payslipLockDay: current.payslipLockDay,
+        weeklyOffDays: current.weeklyOffDays,
         leaveYearStartMonth: current.leaveYearStartMonth,
         fiscalYearStartMonth: current.fiscalYearStartMonth,
         ...data,

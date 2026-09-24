@@ -40,6 +40,16 @@ model OrganizationPolicy {
   /// Null means never locked, which is a decision rather than an oversight.
   payslipLockDay Int?
 
+  /// Which weekdays the company does not work, as Sunday=0.
+  ///
+  /// Default [0] — Sunday only, which is the common Indian office pattern.
+  /// Nothing stored this before, so leave days were about to be counted
+  /// against a weekend the system did not know existed.
+  ///
+  /// It cannot express ALTERNATE Saturdays, which a large share of Indian
+  /// offices work. Flagged in domain/leave/leaveDays rather than guessed at.
+  weeklyOffDays Int[] @default([0])
+
   /// Which month a leave year begins in. 4 = April, matching the Indian
   /// financial year; the client may run leave on the calendar year instead.
   leaveYearStartMonth  Int @default(4)

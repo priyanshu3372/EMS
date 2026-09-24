@@ -22,6 +22,17 @@ function num(value: Prisma.Decimal | null): number | null {
   return value == null ? null : Number(value)
 }
 
+/** Sunday first, matching getUTCDay() and the stored numbers. */
+const WEEKDAY_NAMES = [
+  'Sunday',
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+]
+
 function isoDate(value: Date | null): string | null {
   return value ? value.toISOString().slice(0, 10) : null
 }
@@ -88,6 +99,10 @@ function policyPayload(policy: Policy) {
     esi_threshold: num(policy.esiThreshold),
     pay_day: policy.payDay,
     payslip_lock: policy.payslipLockDay,
+    // Numbers for the form to bind to, and names so a settings page can
+    // render "Saturday, Sunday" without a lookup table of its own.
+    weekly_off_days: policy.weeklyOffDays,
+    weekly_off_day_names: policy.weeklyOffDays.map((d) => WEEKDAY_NAMES[d] ?? String(d)),
     leave_year_start_month: policy.leaveYearStartMonth,
     fiscal_year_start_month: policy.fiscalYearStartMonth,
     effective_from: isoDate(policy.effectiveFrom),

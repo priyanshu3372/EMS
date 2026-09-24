@@ -1,0 +1,148 @@
+import type { RequestHandler } from 'express'
+import type { Prisma } from '@prisma/client'
+import {
+  previewLeave,
+  applyForLeave,
+  listLeave,
+  myBalances,
+  cancelLeave,
+} from '../../modules/leave/leave.service'
+import {
+  leavePreviewSchema,
+  leaveApplySchema,
+  leaveQuerySchema,
+  balanceQuerySchema,
+  leaveIdSchema,
+} from '../validators/leave.validator'
+import { parseBody } from '../validators/parse'
+import { appContext } from '../context'
+import type { LeaveRequestRow } from '../../modules/leave/leave.repository'
+
+const num = (value: Prisma.Decimal | null) => (value == null ? null : Number(value))
+const day = (value: Date) => value.toISOString().slice(0, 10)
+
+/** Snake_case out, matching the names the Leave page already reads. */
+function request(row: LeaveRequestRow) {
+  return {
+    id: row.id,
+    employee_id: row.employeeId,
+    employee_code: row.employee.employeeCode,
+    full_name: row.employee.fullName,
+    department: row.employee.department?.name ?? null,
+
+    leave_type: row.leaveType.code,
+    leave_type_id: row.leaveTypeId,
+    leave_type_name: row.leaveType.name,
+    is_paid: row.leaveType.isPaid,
+
+    from_date: day(row.fromDate),
+    to_date: day(row.toDate),
+    half_day_dates: row.halfDayDates,
+    days: num(row.days),
+    leave_year: row.leaveYear,
+
+    reason: row.reason,
+    status: row.status,
+
+    applied_on: row.appliedAt.toISOString(),
+    reviewed_at: row.reviewedAt?.toISOString() ?? null,
+    review_note: row.reviewNote,
+  }
+}
+
+/**
+ * POST /api/leave-requests/preview
+ *
+ * Its own endpoint because the answer is not obvious. Five calendar days can be
+ * three working days, and somebody about to spend three of their four remaining
+ * days should see that before they commit.
+ */
+export const postPreview: RequestHandler = async (req, res) => {
+  const ctx = appContext(res)
+  const input = parseBody(leavePreviewSchema, req.body)
+
+  const preview = await previewLeave(ctx, input)
+
+  res.status(200).json({
+    data: {
+      days: preview.days,
+      leave_year: preview.leaveYear,
+      // Every day and why it did or did not count. This is what lets somebody
+      // see WHY five days is three, without reconstructing the rules.
+      breakdown: preview.breakdown.map((d) => ({
+        date: d.date,
+        counted: d.counted,
+        reason: d.reason,
+      })),
+      balance: {
+        balance: preview.balance.balance,
+        pending: preview.balance.pending,
+        available: preview.balance.available,
+        annual_quota: preview.balance.annualQuota,
+      },
+      // Null means it would be accepted. The page can show the problem without
+      // the request having to fail first.
+      problem: preview.problem,
+    },
+    meta: { requestId: res.locals.requestId },
+  })
+}
+
+/** POST /api/leave-requests */
+export const postLeave: RequestHandler = async (req, res) => {
+  const ctx = appContext(res)
+  const input = parseBody(leaveApplySchema, req.body)
+
+  const created = await applyForLeave(ctx, input)
+
+  res.status(201).json({ data: request(created), meta: { requestId: res.locals.requestId } })
+}
+
+/** GET /api/leave-requests */
+export const getLeave: RequestHandler = async (req, res) => {
+  const ctx = appContext(res)
+  const filters = parseBody(leaveQuerySchema, req.query)
+
+  const rows = await listLeave(ctx, filters)
+
+  res.status(200).json({
+    data: rows.map(request),
+    meta: { requestId: res.locals.requestId, total: rows.length },
+  })
+}
+
+/** GET /api/leave-requests/balances */
+export const getBalances: RequestHandler = async (req, res) => {
+  const ctx = appContext(res)
+  const { employeeId } = parseBody(balanceQuerySchema, req.query)
+
+  const { leaveYear, balances } = await myBalances(ctx, employeeId)
+
+  res.status(200).json({
+    data: {
+      leave_year: leaveYear,
+      balances: balances.map((b) => ({
+        leave_type_id: b.leaveTypeId,
+        code: b.code,
+        name: b.name,
+        annual_quota: b.annualQuota,
+        balance: b.balance,
+        // Sent separately so the page can show "4 days, 2 awaiting approval"
+        // rather than one number that means neither.
+        pending: b.pending,
+        available: b.available,
+      })),
+    },
+    meta: { requestId: res.locals.requestId },
+  })
+}
+
+/** DELETE /api/leave-requests/:id — withdraw, while still pending. */
+export const deleteLeave: RequestHandler = async (req, res) => {
+  const ctx = appContext(res)
+  const { id } = parseBody(leaveIdSchema, req.params)
+
+  const cancelled = await cancelLeave(ctx, id)
+
+  res.status(200).json({ data: request(cancelled), meta: { requestId: res.locals.requestId } })
+}
