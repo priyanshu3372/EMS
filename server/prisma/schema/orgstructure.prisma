@@ -74,6 +74,7 @@ model Shift {
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   employees    Employee[]
+  attendance   Attendance[]
 
   @@unique([organizationId, name])
   @@index([organizationId, archivedAt])

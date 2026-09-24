@@ -56,4 +56,6 @@ model Organization {
   ptSlabs   PtSlab[]
   holidays  Holiday[]
   geofences GeofenceLocation[]
+
+  attendance Attendance[]
 }

@@ -10,6 +10,7 @@ import { authRouter } from './http/routes/auth.routes'
 import { employeeRouter } from './http/routes/employee.routes'
 import { userRouter } from './http/routes/user.routes'
 import { settingsRouter } from './http/routes/settings.routes'
+import { attendanceRouter } from './http/routes/attendance.routes'
 
 /**
  * Assembles the app but does not listen. main.ts owns the port, so tests can
@@ -52,6 +53,7 @@ export function createApp() {
   app.use('/api/employees', employeeRouter)
   app.use('/api/users', userRouter)
   app.use('/api/settings', settingsRouter)
+  app.use('/api/attendance', attendanceRouter)
 
   // Express 5 uses path-to-regexp v8: a bare '*' throws at startup.
   app.use('/{*splat}', notFound)
