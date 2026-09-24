@@ -1,0 +1,102 @@
+/// One row per employee per day.
+///
+/// The old schema had none of this: no hours, no source, no geofence evidence.
+/// Each of those absences is a question the system could not answer — "how long
+/// did she work?", "who marked this?", "was he actually at the office?" — and
+/// every one of them gets asked eventually, usually in an argument about pay.
+
+/// HOW a particular row came to exist. Distinct from Employee.attendanceMode,
+/// which is the POLICY for that person.
+///
+/// Both are needed: an `app` employee may still have one day corrected by HR.
+/// Their mode stays `app`; that row's source is `manual`. A single field cannot
+/// express the difference, and without it nobody can tell who created a record.
+enum AttendanceSource {
+  /// The employee punched in through the app. Geofence applied.
+  punch
+  /// Imported from the biometric device by CSV (Day 12).
+  biometric
+  /// Entered by HR on someone's behalf.
+  manual
+  /// Generated from an approved leave request (Day 14), so a leave day is a
+  /// real row rather than a gap that reports have to interpret.
+  leave
+}
+
+enum AttendanceStatus {
+  present
+  half_day
+  absent
+  on_leave
+  holiday
+  weekly_off
+}
+
+model Attendance {
+  id             String @id @default(uuid())
+  organizationId String
+  employeeId     String
+
+  /// The calendar day this belongs to, in the COMPANY'S timezone — computed by
+  /// domain/shared/dates.ts, never by toISOString(). A night-shift punch at
+  /// 00:30 IST is 19:00 UTC the previous day, and filing it under the wrong
+  /// date is a bug that shows up as one employee whose hours never add up.
+  date DateTime @db.Date
+
+  /// Instants, not times-on-a-day. This is what makes an overnight shift work
+  /// without any special handling: the timestamps carry their own dates.
+  checkIn  DateTime? @db.Timestamptz(3)
+  checkOut DateTime? @db.Timestamptz(3)
+
+  status AttendanceStatus @default(absent)
+  source AttendanceSource @default(punch)
+
+  /// COMPUTED AND STORED, not derived on read.
+  ///
+  /// The client asked to see both daily hours and a monthly total. Recomputing
+  /// from timestamps on every read would be fine until the shift's break
+  /// minutes change — and then last month's totals would silently change too.
+  /// Storing the number freezes what was actually worked.
+  hoursWorked Decimal? @db.Decimal(5, 2)
+
+  /// Which shift this day was measured against, captured at punch time. The
+  /// employee's shift may be reassigned later; this row must still be readable
+  /// against the one that applied on the day.
+  shiftId       String?
+  expectedHours Decimal? @db.Decimal(4, 2)
+
+  /// The four geofence columns. Evidence, not a decision — the decision is
+  /// `geofenceVerified`, and these are what allow it to be explained or
+  /// disputed afterwards.
+  checkInLatitude       Decimal? @db.Decimal(10, 7)
+  checkInLongitude      Decimal? @db.Decimal(10, 7)
+  /// How far from the office the reading put them.
+  checkInDistanceMeters Int?
+  /// The phone's own estimate of how wrong it might be. Without this a 30 m
+  /// fence cannot be defended: "25 m away" means nothing until you know whether
+  /// that is give-or-take five metres or fifty.
+  checkInAccuracyMeters Int?
+
+  /// Null means no check was made — a biometric or manual row, where a GPS
+  /// reading would be meaningless rather than merely missing.
+  geofenceVerified Boolean?
+
+  /// Free text. HR's reason for a manual entry or a correction.
+  note String?
+
+  /// Who created or last changed this row, when it was not the employee.
+  markedByUserId String?
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employee     Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  shift        Shift?       @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+
+  /// One row per person per day — the client was explicit about one punch pair.
+  /// Enforced by the database, so a double-submitted form cannot create two.
+  @@unique([organizationId, employeeId, date])
+  @@index([organizationId, date])
+  @@index([organizationId, employeeId, date])
+}

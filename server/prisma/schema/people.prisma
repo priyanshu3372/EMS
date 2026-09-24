@@ -95,6 +95,7 @@ model Employee {
   bankAccount       EmployeeBankAccount?
   statutoryIdentity EmployeeStatutoryIdentity?
   leaveLedger       LeaveLedgerEntry[]
+  attendance        Attendance[]
 
   @@unique([organizationId, employeeCode])
   @@index([organizationId, archivedAt])

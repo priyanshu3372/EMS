@@ -1,5 +1,6 @@
 import { UserCheck, CalendarDays, Clock, TrendingUp, CheckCircle, XCircle, AlertCircle } from 'lucide-react'
 import { useMyDashboardStats } from '../../hooks/useDashboard'
+import PunchCard from '../attendance/PunchCard'
 
 const LEAVE_TYPE_LABELS = {
   sick: 'Sick Leave', casual: 'Casual Leave', earned: 'Earned Leave',
@@ -65,6 +66,15 @@ export default function EmployeeDashboard() {
         <h2 className="text-2xl font-bold text-gray-900">My Dashboard</h2>
         <p className="text-sm text-gray-500 mt-0.5">{today}</p>
       </div>
+
+      {/*
+        Check In / Check Out, first thing on the page.
+
+        The client asked for the punch to update the dashboard the moment it
+        happens; the card invalidates the dashboard query on success, so the
+        figures below refresh without a reload.
+      */}
+      <PunchCard />
 
       {/* Profile banner */}
       <div className="bg-gradient-to-r from-blue-600 to-blue-700 rounded-xl p-5 text-white flex items-center gap-4">

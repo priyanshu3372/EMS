@@ -1,0 +1,125 @@
+/**
+ * How long somebody worked.
+ *
+ * Pure arithmetic. No Date.now(), no timezone lookups, no database — every
+ * value is passed in, which is what lets the awkward cases be tested directly
+ * instead of by arranging for midnight to happen.
+ */
+
+const MINUTES_PER_DAY = 24 * 60
+
+/** Two decimal places. 7.4999 hours is 7.5, not 7.49. */
+function round(hours: number): number {
+  return Math.round(hours * 100) / 100
+}
+
+export interface HoursResult {
+  hours: number
+  /** Present when the numbers are usable but something about them is odd. */
+  warning?: string
+}
+
+/**
+ * Hours between two instants, minus an unpaid break.
+ *
+ * Across midnight needs no special handling here: the timestamps carry their
+ * own dates, so a punch-in at 22:00 and a punch-out at 06:00 the next morning
+ * are simply eight hours apart. That is the whole reason check-in and check-out
+ * are instants rather than wall-clock times on a row that has one date.
+ */
+export function hoursBetween(
+  checkIn: Date,
+  checkOut: Date,
+  breakMinutes: number,
+): HoursResult {
+  const elapsedMinutes = (checkOut.getTime() - checkIn.getTime()) / 60_000
+
+  if (elapsedMinutes < 0) {
+    // Only reachable through manual entry or a corrected row. Returning zero
+    // with a warning beats returning a negative number that would quietly
+    // reduce somebody's monthly total.
+    return { hours: 0, warning: 'Check-out is before check-in' }
+  }
+
+  if (elapsedMinutes > MINUTES_PER_DAY) {
+    return {
+      hours: round(MINUTES_PER_DAY / 60),
+      warning: 'More than 24 hours between check-in and check-out; capped at 24',
+    }
+  }
+
+  // The break only comes off time that was actually worked. Subtracting an
+  // hour from a fifteen-minute shift would produce negative hours.
+  const worked = Math.max(0, elapsedMinutes - Math.max(0, breakMinutes))
+
+  return { hours: round(worked / 60) }
+}
+
+/**
+ * Hours between two WALL-CLOCK times, where the end may be on the next day.
+ *
+ * For manual entry, where HR types "22:00" and "06:00" and means an overnight
+ * shift. There are no dates to compare, so the rule is: an end earlier than the
+ * start means it wrapped past midnight.
+ *
+ * That rule is an assumption, and it has one failure it cannot detect — an
+ * entry of 09:00 to 08:00 meaning twenty-three hours would be read the same way
+ * as a typo. The cap above catches the extreme; the warning covers the rest.
+ */
+export function hoursBetweenWallClock(
+  startMinutes: number,
+  endMinutes: number,
+  breakMinutes: number,
+): HoursResult {
+  const wrapped = endMinutes <= startMinutes
+  const elapsed = wrapped ? MINUTES_PER_DAY - startMinutes + endMinutes : endMinutes - startMinutes
+
+  const worked = Math.max(0, elapsed - Math.max(0, breakMinutes))
+  const result: HoursResult = { hours: round(worked / 60) }
+
+  if (wrapped) result.warning = 'Treated as an overnight shift'
+  return result
+}
+
+/**
+ * Whether a day counts as full, half or absent against the shift.
+ *
+ * Thresholds are fractions of the EXPECTED hours rather than fixed numbers, so
+ * a company with a six-hour shift gets a sensible half-day without anybody
+ * editing this file. The client's shift is nine hours; half of that is 4.5.
+ */
+/** Worked at least this fraction of the shift to earn a half day. */
+const HALF_DAY_FRACTION = 0.5
+/** Worked at least this fraction to count as a full day. */
+const FULL_DAY_FRACTION = 0.75
+
+export interface DayClassification {
+  status: 'present' | 'half_day' | 'absent'
+  shortfallHours: number
+}
+
+export function classifyDay(worked: number, expectedHours: number): DayClassification {
+  const expected = expectedHours > 0 ? expectedHours : 0
+  const shortfall = round(Math.max(0, expected - worked))
+
+  // A half day means HALF. Below that it is absent — anything looser pays a
+  // half day for two hours of work, which is a decision nobody made on purpose.
+  //
+  // CLIENT DECISION, not a fact. These two numbers determine what appears on a
+  // payslip, and companies differ: some pay a half day from four hours, some
+  // require a written approval below the full shift. Confirm before go-live.
+  if (expected > 0 && worked < expected * HALF_DAY_FRACTION) {
+    return { status: 'absent', shortfallHours: shortfall }
+  }
+
+  if (expected > 0 && worked < expected * FULL_DAY_FRACTION) {
+    return { status: 'half_day', shortfallHours: shortfall }
+  }
+
+  return { status: 'present', shortfallHours: shortfall }
+}
+
+/** Sums a month of daily hours. Kept here so rounding happens in one place. */
+export function totalHours(daily: number[]): number {
+  return round(daily.reduce((sum, hours) => sum + hours, 0))
+}
