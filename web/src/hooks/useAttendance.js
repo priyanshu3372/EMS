@@ -1,65 +1,142 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { supabase } from '../lib/supabase'
-import { sendNotification } from './useNotifications'
+import { api } from '../api/http'
+
+/**
+ * Attendance, served by our own API.
+ *
+ * THE BUG THIS REPLACES. The month query used to build its range end as
+ * `${year}-${month}-31`. In February, April, June, September and November that
+ * string is not a date, so the query returned nothing and the monthly view was
+ * BLANK FIVE MONTHS A YEAR.
+ *
+ * Nobody reported it as a bug. They reported that attendance "sometimes does
+ * not load", which is a much harder thing to act on — and it is why the range
+ * is now built on the server, half-open, from a year and a month.
+ *
+ * Hook names and argument shapes are unchanged, so the Attendance page did not
+ * have to be rewritten in the same commit that moved the data.
+ */
+
+const keys = {
+  day: (date) => ['attendance', 'day', date],
+  month: (year, month) => ['attendance', 'month', year, month],
+  summary: (date) => ['attendance', 'summary', date ?? 'today'],
+  monthly: (year, month) => ['attendance', 'monthly-summary', year, month],
+}
+
+function invalidateAll(queryClient) {
+  queryClient.invalidateQueries({ queryKey: ['attendance'] })
+  queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+}
 
 export function useAttendance(date) {
   return useQuery({
-    queryKey: ['attendance', date],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('attendance')
-        .select('*, profiles(full_name, employee_id, department, designation)')
-        .eq('date', date)
-        .order('created_at')
-      if (error) throw error
-      return data
-    },
+    queryKey: keys.day(date),
+    queryFn: async () => (await api.get(`/attendance?date=${date}`)).data,
     enabled: !!date,
   })
 }
 
+/**
+ * A whole month.
+ *
+ * `year` and `month` go to the server as numbers and the range is built there,
+ * so there is no date string for anyone to get wrong.
+ */
 export function useMonthAttendance(year, month) {
-  const from = `${year}-${String(month).padStart(2, '0')}-01`
-  const to   = `${year}-${String(month).padStart(2, '0')}-31`
   return useQuery({
-    queryKey: ['attendance', 'month', year, month],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('attendance')
-        .select('*, profiles(full_name, employee_id, department, designation)')
-        .gte('date', from)
-        .lte('date', to)
-        .order('date')
-      if (error) throw error
-      return data
-    },
+    queryKey: keys.month(year, month),
+    queryFn: async () => (await api.get(`/attendance?year=${year}&month=${month}`)).data,
+    enabled: Boolean(year && month),
   })
 }
 
-export function useMarkAttendance() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: async (record) => {
-      const { error } = await supabase
-        .from('attendance')
-        .upsert(record, { onConflict: 'employee_id,date' })
-      if (error) throw error
+/**
+ * Monthly hours per employee — the figure the client asked for by name.
+ *
+ * Aggregated in Postgres. Summing the rows this page happened to load would
+ * give a smaller number as soon as the list is paginated, and it would be
+ * wrong in a way nobody would notice.
+ */
+export function useMonthlyHours(year, month, employeeId) {
+  const query = employeeId ? `&employeeId=${employeeId}` : ''
+  return useQuery({
+    queryKey: [...keys.monthly(year, month), employeeId ?? 'all'],
+    queryFn: async () =>
+      (await api.get(`/attendance/monthly-summary?year=${year}&month=${month}${query}`)).data,
+    enabled: Boolean(year && month),
+  })
+}
 
-      if (record.employee_id) {
-        const formattedStatus = record.status ? record.status.replace('_', ' ').toUpperCase() : 'Recorded'
-        await sendNotification({
-          userId: record.employee_id,
-          title: 'Attendance Marked',
-          message: `Attendance for ${record.date} recorded as ${formattedStatus}.`,
-          type: 'attendance',
-          link: '/attendance'
+/** One day's company figures, for the dashboard. */
+export function useAttendanceSummary(date) {
+  return useQuery({
+    queryKey: keys.summary(date),
+    queryFn: async () =>
+      (await api.get(date ? `/attendance/summary?date=${date}` : '/attendance/summary')).data,
+  })
+}
+
+/**
+ * HR recording somebody's day.
+ *
+ * Times go as wall clock — "09:30" — which is what HR types and what the shift
+ * is written in. The server turns them into instants using the company's
+ * timezone, so an overnight correction becomes two timestamps on different days
+ * rather than a negative duration.
+ */
+export function useMarkAttendance() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({ employee_uuid, date, status, check_in, check_out, note }) =>
+      (
+        await api.post('/attendance/mark', {
+          employeeId: employee_uuid,
+          date,
+          status,
+          checkIn: check_in || null,
+          checkOut: check_out || null,
+          note: note || null,
         })
-      }
-    },
-    onSuccess: (_, vars) => {
-      qc.invalidateQueries({ queryKey: ['attendance', vars.date] })
-      qc.invalidateQueries({ queryKey: ['attendance', 'month'] })
-      qc.invalidateQueries({ queryKey: ['notifications'] })
+      ).data,
+    onSuccess: () => invalidateAll(queryClient),
+  })
+}
+
+/** Correcting an existing row. The employee and date come from the row. */
+export function useAmendAttendance() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({ id, status, check_in, check_out, note }) =>
+      (
+        await api.patch(`/attendance/${id}`, {
+          status,
+          checkIn: check_in || null,
+          checkOut: check_out || null,
+          note: note || null,
+        })
+      ).data,
+    onSuccess: () => invalidateAll(queryClient),
+  })
+}
+
+/**
+ * Biometric CSV import.
+ *
+ * Preview unless `dryRun` is explicitly false, like the employee importer. The
+ * preview reports `would_overwrite`, because replacing a day HR already fixed
+ * by hand is worth knowing before rather than after.
+ */
+export function useImportAttendance() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({ csv, dryRun = true }) =>
+      (await api.post('/attendance/import', { csv, dryRun })).data,
+    onSuccess: (_result, variables) => {
+      if (variables.dryRun === false) invalidateAll(queryClient)
     },
   })
 }

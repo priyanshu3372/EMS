@@ -21,12 +21,12 @@ export interface AuthIdentity {
   role: Role
   status: AccountStatus
 
-  employee: { id: string; fullName: string; employeeCode: string } | null
+  employee: { id: string; fullName: string; employeeCode: string; attendanceMode: string } | null
 }
 
 const membershipInclude = {
   organization: { select: { id: true, name: true } },
-  employee: { select: { id: true, fullName: true, employeeCode: true } },
+  employee: { select: { id: true, fullName: true, employeeCode: true, attendanceMode: true } },
 } as const
 
 export async function findIdentityByEmail(email: string): Promise<AuthIdentity | null> {
@@ -95,7 +95,12 @@ export async function findIdentityByEmployeeCode(code: string): Promise<AuthIden
     organizationName: membership.organization.name,
     role: membership.role,
     status: membership.status,
-    employee: { id: employee.id, fullName: employee.fullName, employeeCode: employee.employeeCode },
+    employee: {
+      id: employee.id,
+      fullName: employee.fullName,
+      employeeCode: employee.employeeCode,
+      attendanceMode: employee.attendanceMode,
+    },
   }
 }
 

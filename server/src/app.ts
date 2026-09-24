@@ -37,7 +37,9 @@ export function createApp() {
   // uploading thinks it means.
   const parseJson = express.json({ limit: '1mb' })
   app.use((req, res, next) =>
-    req.path === '/api/employees/import' ? next() : parseJson(req, res, next),
+    req.path === '/api/employees/import' || req.path === '/api/attendance/import'
+      ? next()
+      : parseJson(req, res, next),
   )
   app.use(cookieParser())
   app.use(requestContext)
