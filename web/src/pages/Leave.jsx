@@ -220,77 +220,97 @@ function RequestsTab({ requests, onApprove, onReject, isLoading, isManagement })
 
 // ─── Leave Balance tab ────────────────────────────────────────────────────────
 
-const BALANCE_TYPES = [
-  { key: 'casual', label: 'Casual', max: 12, color: 'bg-blue-500' },
-  { key: 'sick', label: 'Sick', max: 12, color: 'bg-red-400' },
-  { key: 'earned', label: 'Earned', max: 18, color: 'bg-purple-500' },
-  { key: 'wfh', label: 'WFH', max: 24, color: 'bg-teal-500' },
-]
+/**
+ * Leave balances for whoever is signed in.
+ *
+ * TWO THINGS CHANGED HERE, and both were the same bug.
+ *
+ * The quotas used to be hardcoded — casual 12, earned 18, work-from-home 24 —
+ * so the progress bars were a percentage of a number nobody had configured. A
+ * company that sets casual leave to fifteen days got bars that were quietly
+ * wrong. Every figure below now comes from the server, including the quota.
+ *
+ * The table also used to list EVERY employee. That view belongs to HR and needs
+ * an endpoint that returns balances for many people; today's returns the
+ * caller's own. Showing one person's numbers under a heading that says
+ * "per employee" would be worse than showing them honestly, so the heading
+ * changed too. The HR view is noted for a later day rather than faked.
+ */
+function BalanceTab() {
+  // No arguments: the server decides whose balances these are. Passing a user
+  // id from the browser was never a filter, only a suggestion — see §A11.
+  const { data: balances = [], isLoading } = useLeaveBalances()
 
-function BalanceTab({ userId, role }) {
-  const { data: balances = [], isLoading } = useLeaveBalances(userId, role)
+  const colours = ['bg-blue-500', 'bg-red-400', 'bg-purple-500', 'bg-teal-500', 'bg-amber-500']
+
   return (
     <div className="space-y-4">
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
         <div className="px-5 py-4 border-b border-gray-100">
-          <p className="text-base font-semibold text-gray-900">Leave Balance — FY {new Date().getFullYear()}</p>
-          <p className="text-xs text-gray-400 mt-0.5">Remaining days per employee</p>
+          <p className="text-base font-semibold text-gray-900">My Leave Balance</p>
+          <p className="text-xs text-gray-400 mt-0.5">
+            Days remaining this leave year, after anything already applied for
+          </p>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[600px]">
-            <thead>
-              <tr className="bg-gray-50 border-b border-gray-200">
-                <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Employee</th>
-                {BALANCE_TYPES.map((t) => (
-                  <th key={t.key} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                    {t.label} <span className="text-gray-400 font-normal normal-case">/ {t.max}</span>
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {isLoading ? (
-                <tr><td colSpan={5} className="text-center py-16 text-sm text-gray-400">Loading…</td></tr>
-              ) : balances.length === 0 ? (
-                <tr><td colSpan={5} className="text-center py-16 text-sm text-gray-400">No balance data yet.</td></tr>
-              ) : balances.map((emp) => (
-                <tr key={emp.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                  <td className="px-5 py-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
-                        <span className="text-blue-700 text-xs font-semibold">{initials(emp.profiles?.full_name)}</span>
-                      </div>
-                      <p className="text-sm font-medium text-gray-900">{emp.profiles?.full_name || '—'}</p>
+
+        {isLoading ? (
+          <p className="text-center py-16 text-sm text-gray-400">Loading…</p>
+        ) : balances.length === 0 ? (
+          <p className="text-center py-16 text-sm text-gray-400">
+            No leave types are configured yet.
+          </p>
+        ) : (
+          <div className="p-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {balances.map((b, index) => {
+              // Against the quota the SERVER reports, not a number in this file.
+              // A quota of zero means the type is granted rather than accrued —
+              // comp off, work from home — and a percentage of zero is not a
+              // number worth drawing.
+              const quota = b.annual_quota ?? 0
+              const pct = quota > 0 ? Math.min(100, Math.round((b.available / quota) * 100)) : null
+
+              return (
+                <div key={b.leave_type_id} className="border border-gray-200 rounded-xl p-4 space-y-2.5">
+                  <div className="flex items-baseline justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-gray-900">{b.name}</p>
+                      <p className="text-xs text-gray-400">{b.code}</p>
                     </div>
-                  </td>
-                  {BALANCE_TYPES.map((t) => {
-                    const val = emp[t.key] ?? 0
-                    const pct = Math.round(val / t.max * 100)
-                    return (
-                      <td key={t.key} className="px-4 py-4">
-                        <div className="space-y-1.5">
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm font-semibold text-gray-900">{val}</span>
-                            <span className="text-xs text-gray-400">{pct}%</span>
-                          </div>
-                          <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                            <div className={`h-full ${t.color} rounded-full`} style={{ width: `${pct}%` }} />
-                          </div>
-                        </div>
-                      </td>
-                    )
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                    <p className="text-2xl font-bold text-gray-900">{b.available}</p>
+                  </div>
+
+                  {pct === null ? (
+                    <p className="text-xs text-gray-400">Granted as needed, not accrued</p>
+                  ) : (
+                    <>
+                      <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full ${colours[index % colours.length]} rounded-full`}
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                      <p className="text-xs text-gray-400">of {quota} days</p>
+                    </>
+                  )}
+
+                  {b.pending > 0 && (
+                    // Shown separately because it is a different fact: these
+                    // days are not spent, they are spoken for. One number that
+                    // meant both would mean neither.
+                    <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                      {b.pending} day{b.pending === 1 ? '' : 's'} awaiting approval
+                    </p>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
       </div>
     </div>
   )
 }
 
-// ─── Holiday Calendar tab ─────────────────────────────────────────────────────
 
 function HolidaysTab() {
   const { data: holidays = [] } = useHolidays()
@@ -381,7 +401,9 @@ function HolidaysTab() {
 export default function Leave() {
   const { user, role } = useAuthStore()
   const isManagement = ['super_admin', 'admin', 'hr', 'manager', 'rm'].includes(role)
-  const { data: requests = [], isLoading } = useLeaveRequests(user?.id, role)
+  // Same: scoping moved to the server. HR sees the company, a manager their
+  // direct reports, an employee their own.
+  const { data: requests = [], isLoading } = useLeaveRequests()
   const updateLeaveStatus = useUpdateLeaveStatus()
   const applyLeave = useApplyLeave()
   const [tab, setTab] = useState('requests')
@@ -447,7 +469,7 @@ export default function Leave() {
         {tab === 'requests' && (
           <RequestsTab requests={requests} isLoading={isLoading} onApprove={handleApprove} onReject={handleReject} onApply={handleApply} isManagement={isManagement} />
         )}
-        {tab === 'balance' && <BalanceTab userId={user?.id} role={role} />}
+        {tab === 'balance' && <BalanceTab />}
         {tab === 'holidays' && <HolidaysTab />}
       </div>
 

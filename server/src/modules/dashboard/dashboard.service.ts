@@ -1,0 +1,326 @@
+import type { AppContext } from '../../platform/context'
+import { Forbidden } from '../../platform/errors/AppError'
+import { zonedToday, toDateColumn, type CalendarDate } from '../../domain/shared/dates'
+import * as leaveRepo from '../leave/leave.repository'
+import { leaveYearOf } from '../leave/leave.service'
+
+/**
+ * The first screen every role sees.
+ *
+ * It had no day at all in version 1 of the plan, and it is where the audit's
+ * worst habit lived: a leave balance that fell back to a hardcoded 12/12/18/24
+ * when the database had nothing. An employee with no entitlement saw twelve
+ * days of casual leave, applied for them, and was refused by a system that had
+ * just told them they were available.
+ *
+ * Nothing here invents a number. A figure that is not known comes back as null
+ * or zero with a name that says which.
+ */
+
+async function companyTimezone(ctx: AppContext): Promise<string> {
+  const organization = await ctx.db.organization.findUnique({
+    where: { id: ctx.organizationId },
+    select: { timezone: true },
+  })
+  return organization?.timezone ?? 'Asia/Kolkata'
+}
+
+/** The Monday of the week `date` falls in. */
+function mondayOf(date: CalendarDate): CalendarDate {
+  const d = new Date(`${date}T00:00:00Z`)
+  const shift = (d.getUTCDay() + 6) % 7
+  d.setUTCDate(d.getUTCDate() - shift)
+  return d.toISOString().slice(0, 10)
+}
+
+function addDays(date: CalendarDate, days: number): CalendarDate {
+  const d = new Date(`${date}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + days)
+  return d.toISOString().slice(0, 10)
+}
+
+export interface CompanySummary {
+  date: CalendarDate
+  totalEmployees: number
+  presentToday: number
+  onLeaveToday: number
+  absentToday: number
+  /** Nobody has recorded anything for these people yet — not the same as absent. */
+  /**
+   * Whether today is a company weekly off, and how many people that covers.
+   *
+   * DERIVED from the policy, not counted from attendance — the system does not
+   * create rows for days nobody works, so there is nothing to count. Reporting
+   * zero would be wrong in a different way: it would say everybody was absent
+   * on a Sunday.
+   */
+  isWeeklyOffToday: boolean
+  weeklyOffToday: number
+  notMarkedToday: number
+  pendingLeaveCount: number
+  pendingLeaves: {
+    id: string
+    employeeCode: string
+    fullName: string
+    leaveType: string
+    fromDate: CalendarDate
+    toDate: CalendarDate
+    days: number
+    reason: string
+    appliedAt: string
+  }[]
+  byDepartment: { department: string; headcount: number; presentToday: number }[]
+  thisWeek: { date: CalendarDate; present: number; absent: number; onLeave: number }[]
+  recentJoiners: { id: string; fullName: string; employeeCode: string; department: string | null; dateOfJoining: CalendarDate | null }[]
+}
+
+/**
+ * The company view, for anybody who manages people.
+ *
+ * Scoped like everything else: a manager's figures cover their team, HR's cover
+ * the company. The same endpoint, two different truths, decided by the scope
+ * rather than by which page called it.
+ */
+export async function companySummary(ctx: AppContext): Promise<CompanySummary> {
+  const today = zonedToday(new Date(), await companyTimezone(ctx))
+  const weekStart = mondayOf(today)
+
+  // The ATTENDANCE scope, deliberately — not the employee one.
+  //
+  // A manager may browse the whole staff directory (§4.4) but may only see
+  // their own team attendance. Counting headcount from the directory would
+  // produce "2 present out of 40" on a dashboard that can see two people
+  // attendance — arithmetically true and completely misleading.
+  const scope = ctx.scopeFor('attendance')
+
+  const employeeWhere =
+    scope.scope === 'DIRECT_REPORTS' && scope.employeeId
+      ? {
+          archivedAt: null,
+          OR: [{ reportingManagerId: scope.employeeId }, { id: scope.employeeId }],
+        }
+      : { archivedAt: null }
+
+  const policy = await ctx.db.organizationPolicy.findFirst({ where: { effectiveTo: null } })
+  const weeklyOffDays = policy?.weeklyOffDays ?? [0]
+  const isWeeklyOffToday = weeklyOffDays.includes(new Date(`${today}T00:00:00Z`).getUTCDay())
+
+  const [employees, todayRows, weekRows, pending] = await Promise.all([
+    ctx.db.employee.findMany({
+      where: employeeWhere,
+      select: {
+        id: true,
+        fullName: true,
+        employeeCode: true,
+        dateOfJoining: true,
+        department: { select: { name: true } },
+      },
+      orderBy: { dateOfJoining: 'desc' },
+    }),
+    ctx.db.attendance.findMany({
+      where: { date: toDateColumn(today) },
+      select: { employeeId: true, status: true },
+    }),
+    ctx.db.attendance.findMany({
+      where: { date: { gte: toDateColumn(weekStart), lte: toDateColumn(today) } },
+      select: { date: true, status: true },
+    }),
+    leaveRepo.listRequests(ctx.db, ctx.scopeFor('leave'), { status: 'pending' }),
+  ])
+
+  const visible = new Set(employees.map((e) => e.id))
+  const mine = todayRows.filter((r) => visible.has(r.employeeId))
+
+  const countOf = (status: string) => mine.filter((r) => r.status === status).length
+
+  const byDepartment = new Map<string, { headcount: number; presentToday: number }>()
+  for (const employee of employees) {
+    const name = employee.department?.name ?? 'Unassigned'
+    const entry = byDepartment.get(name) ?? { headcount: 0, presentToday: 0 }
+    entry.headcount += 1
+    byDepartment.set(name, entry)
+  }
+  for (const row of mine) {
+    if (row.status !== 'present') continue
+    const employee = employees.find((e) => e.id === row.employeeId)
+    const name = employee?.department?.name ?? 'Unassigned'
+    const entry = byDepartment.get(name)
+    if (entry) entry.presentToday += 1
+  }
+
+  const thisWeek: CompanySummary['thisWeek'] = []
+  for (let offset = 0; offset < 7; offset++) {
+    const date = addDays(weekStart, offset)
+    if (date > today) break
+
+    const rows = weekRows.filter((r) => r.date.toISOString().slice(0, 10) === date)
+    thisWeek.push({
+      date,
+      present: rows.filter((r) => r.status === 'present').length,
+      absent: rows.filter((r) => r.status === 'absent').length,
+      onLeave: rows.filter((r) => r.status === 'on_leave').length,
+    })
+  }
+
+  return {
+    date: today,
+    totalEmployees: employees.length,
+    presentToday: countOf('present'),
+    onLeaveToday: countOf('on_leave'),
+    absentToday: countOf('absent'),
+    // Kept separate from absent. The old dashboard added them together and
+    // reported the whole company absent every morning until somebody marked.
+    isWeeklyOffToday,
+    weeklyOffToday: isWeeklyOffToday ? employees.length : 0,
+    // On a weekly off nobody is expected to mark anything, so "not marked" is
+    // not a gap — it is the day working as intended.
+    notMarkedToday: isWeeklyOffToday ? 0 : Math.max(0, employees.length - mine.length),
+    pendingLeaveCount: pending.length,
+    pendingLeaves: pending.slice(0, 5).map((request) => ({
+      id: request.id,
+      employeeCode: request.employee.employeeCode,
+      fullName: request.employee.fullName,
+      leaveType: request.leaveType.code,
+      fromDate: request.fromDate.toISOString().slice(0, 10),
+      toDate: request.toDate.toISOString().slice(0, 10),
+      days: Number(request.days),
+      reason: request.reason,
+      appliedAt: request.appliedAt.toISOString(),
+    })),
+    byDepartment: [...byDepartment.entries()].map(([department, counts]) => ({
+      department,
+      ...counts,
+    })),
+    thisWeek,
+    recentJoiners: employees
+      .filter((e) => e.dateOfJoining)
+      .slice(0, 5)
+      .map((e) => ({
+        id: e.id,
+        fullName: e.fullName,
+        employeeCode: e.employeeCode,
+        department: e.department?.name ?? null,
+        dateOfJoining: e.dateOfJoining?.toISOString().slice(0, 10) ?? null,
+      })),
+  }
+}
+
+export interface MySummary {
+  date: CalendarDate
+  employee: {
+    fullName: string
+    employeeCode: string
+    department: string | null
+    designation: string | null
+    dateOfJoining: CalendarDate | null
+    attendanceMode: string
+  }
+  thisMonth: {
+    presentDays: number
+    halfDays: number
+    absentDays: number
+    leaveDays: number
+    totalHours: number
+  }
+  today: { status: string | null; checkIn: string | null; checkOut: string | null; hoursWorked: number | null }
+  leaveBalances: { code: string; name: string; annualQuota: number; balance: number; pending: number; available: number }[]
+  recentLeaves: {
+    id: string
+    leaveType: string
+    fromDate: CalendarDate
+    toDate: CalendarDate
+    days: number
+    status: string
+    appliedAt: string
+  }[]
+}
+
+/** The employee's own view. */
+export async function mySummary(ctx: AppContext): Promise<MySummary> {
+  if (!ctx.employeeId) {
+    throw Forbidden('Your account has no employee record, so there is no personal dashboard.')
+  }
+
+  const timezone = await companyTimezone(ctx)
+  const today = zonedToday(new Date(), timezone)
+  const monthStart = `${today.slice(0, 7)}-01`
+
+  const policy = await ctx.db.organizationPolicy.findFirst({ where: { effectiveTo: null } })
+  const leaveYear = leaveYearOf(today, policy?.leaveYearStartMonth ?? 4)
+
+  const [employee, monthRows, balances, leaves] = await Promise.all([
+    ctx.db.employee.findFirst({
+      where: { id: ctx.employeeId },
+      select: {
+        fullName: true,
+        employeeCode: true,
+        dateOfJoining: true,
+        attendanceMode: true,
+        department: { select: { name: true } },
+        designation: { select: { name: true } },
+      },
+    }),
+    ctx.db.attendance.findMany({
+      where: {
+        employeeId: ctx.employeeId,
+        date: { gte: toDateColumn(monthStart), lte: toDateColumn(today) },
+      },
+      select: { date: true, status: true, checkIn: true, checkOut: true, hoursWorked: true },
+    }),
+    leaveRepo.balancesFor(ctx.db, ctx.employeeId, leaveYear),
+    leaveRepo.listRequests(ctx.db, { scope: 'SELF', employeeId: ctx.employeeId }, {}),
+  ])
+
+  const countOf = (status: string) => monthRows.filter((r) => r.status === status).length
+  const todayRow = monthRows.find((r) => r.date.toISOString().slice(0, 10) === today)
+
+  return {
+    date: today,
+    employee: {
+      fullName: employee?.fullName ?? '',
+      employeeCode: employee?.employeeCode ?? '',
+      department: employee?.department?.name ?? null,
+      designation: employee?.designation?.name ?? null,
+      dateOfJoining: employee?.dateOfJoining?.toISOString().slice(0, 10) ?? null,
+      attendanceMode: employee?.attendanceMode ?? 'app',
+    },
+    thisMonth: {
+      presentDays: countOf('present'),
+      halfDays: countOf('half_day'),
+      absentDays: countOf('absent'),
+      leaveDays: countOf('on_leave'),
+      // The figure the client asked to see. Summed from stored hours, so it
+      // matches what the attendance page and the payslip will say.
+      totalHours:
+        Math.round(
+          monthRows.reduce((sum, r) => sum + (r.hoursWorked ? Number(r.hoursWorked) : 0), 0) * 100,
+        ) / 100,
+    },
+    today: {
+      status: todayRow?.status ?? null,
+      checkIn: todayRow?.checkIn?.toISOString() ?? null,
+      checkOut: todayRow?.checkOut?.toISOString() ?? null,
+      hoursWorked: todayRow?.hoursWorked ? Number(todayRow.hoursWorked) : null,
+    },
+    // Straight from the ledger. NO FALLBACK — somebody with no entitlement sees
+    // zero, which is the truth, rather than a comfortable twelve that would let
+    // them apply for leave they do not have.
+    leaveBalances: balances.map((b) => ({
+      code: b.code,
+      name: b.name,
+      annualQuota: b.annualQuota,
+      balance: b.balance,
+      pending: b.pending,
+      available: b.available,
+    })),
+    recentLeaves: leaves.slice(0, 5).map((request) => ({
+      id: request.id,
+      leaveType: request.leaveType.code,
+      fromDate: request.fromDate.toISOString().slice(0, 10),
+      toDate: request.toDate.toISOString().slice(0, 10),
+      days: Number(request.days),
+      status: request.status,
+      appliedAt: request.appliedAt.toISOString(),
+    })),
+  }
+}

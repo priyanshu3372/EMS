@@ -1,200 +1,137 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { supabase } from '../lib/supabase'
-import { useAuthStore } from '../stores/authStore'
-import { sendNotification } from './useNotifications'
+import { api } from '../api/http'
 
-const DEPT_COLORS = {
-  'Engineering': '#2563EB',
-  'Sales': '#16A34A',
-  'HR': '#D97706',
-  'Finance': '#7C3AED',
-  'Operations': '#DC2626',
-  'Marketing': '#0891B2',
-  'Legal': '#DB2777',
+/**
+ * The dashboards.
+ *
+ * THE FABRICATION THIS REPLACES. The old employee dashboard read leave balances
+ * like this:
+ *
+ *     remaining_days: rawBalances.casual ?? 12
+ *
+ * An employee whose balance row did not exist — which is every employee
+ * imported from a CSV — saw twelve days of casual leave, eighteen earned,
+ * twenty-four work-from-home. They applied for them, and were refused by the
+ * same system that had just offered them.
+ *
+ * Nothing here has a fallback. A figure that is not known comes back as zero,
+ * because zero is what they have.
+ */
+
+const keys = {
+  company: ['dashboard', 'summary'],
+  me: ['dashboard', 'me'],
 }
 
+/**
+ * The company view — for HR, admins and managers.
+ *
+ * Scoped by the server: a manager's figures cover their team, HR's cover the
+ * company. The page does not ask for one or the other; it asks for "the
+ * dashboard", and gets the one that belongs to whoever is signed in.
+ */
 export function useDashboardStats() {
-  const today = new Date().toISOString().split('T')[0]
-
   return useQuery({
-    queryKey: ['dashboard_stats', today],
+    queryKey: keys.company,
     queryFn: async () => {
-      const [
-        { data: employees },
-        { data: todayAttendance },
-        { data: pendingLeaves },
-        { data: weekAttendance },
-      ] = await Promise.all([
-        supabase.from('profiles').select('id, full_name, department, designation, date_of_joining, status').eq('status', 'active'),
-        supabase.from('attendance').select('employee_id, status').eq('date', today),
-        supabase.from('leave_requests').select('*, profiles(full_name, department)').eq('status', 'pending').order('applied_on', { ascending: false }),
-        supabase.from('attendance').select('date, status').gte('date', getPastMonday()).lte('date', today),
-      ])
-
-      // RLS may block employees from reading org-wide data — treat as empty, not error
-
-      const totalEmployees = employees?.length ?? 0
-      const presentToday = todayAttendance?.filter(a => a.status === 'present' || a.status === 'wfh').length ?? 0
-      const onLeaveToday = todayAttendance?.filter(a => a.status === 'on_leave').length ?? 0
-      const weeklyOffList = todayAttendance?.filter(a => a.status === 'weekly_off') ?? []
-      const weeklyOffToday = weeklyOffList.length
-
-      const deptWeeklyOff = {}
-      weeklyOffList.forEach(a => {
-        const emp = employees?.find(e => e.id === a.employee_id)
-        const dept = emp?.department || 'Other'
-        deptWeeklyOff[dept] = (deptWeeklyOff[dept] || 0) + 1
-      })
-
-      // Dept breakdown for donut chart
-      const deptCounts = {}
-      employees?.forEach(emp => {
-        const dept = emp.department || 'Other'
-        deptCounts[dept] = (deptCounts[dept] || 0) + 1
-      })
-      const deptData = Object.entries(deptCounts).map(([name, value]) => ({
-        name,
-        value,
-        color: DEPT_COLORS[name] || '#64748B',
-      }))
-
-      // Weekly attendance (group by date)
-      const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-      const weekMap = {}
-      weekAttendance?.forEach(row => {
-        const d = new Date(row.date)
-        const label = dayLabels[d.getDay() === 0 ? 6 : d.getDay() - 1]
-        if (!weekMap[row.date]) weekMap[row.date] = { day: label, present: 0, absent: 0, date: row.date }
-        if (row.status === 'present' || row.status === 'wfh') weekMap[row.date].present++
-        else if (row.status === 'absent') weekMap[row.date].absent++
-      })
-      const weekData = Object.values(weekMap).sort((a, b) => a.date.localeCompare(b.date))
-
-      // Recent joiners (last 60 days)
-      const cutoff = new Date()
-      cutoff.setDate(cutoff.getDate() - 60)
-      const cutoffStr = cutoff.toISOString().split('T')[0]
-      const recentJoiners = employees
-        ?.filter(e => e.date_of_joining >= cutoffStr)
-        .sort((a, b) => b.date_of_joining.localeCompare(a.date_of_joining))
-        .slice(0, 5) ?? []
+      const { data } = await api.get('/dashboard/summary')
 
       return {
-        totalEmployees,
-        presentToday,
-        onLeaveToday,
-        weeklyOffToday,
-        deptWeeklyOff,
-        pendingLeaveCount: pendingLeaves?.length ?? 0,
-        pendingLeaves: pendingLeaves?.slice(0, 5) ?? [],
-        deptData,
-        weekData,
-        recentJoiners,
+        date: data.date,
+        totalEmployees: data.total_employees,
+        presentToday: data.present_today,
+        onLeaveToday: data.on_leave_today,
+        absentToday: data.absent_today,
+        // Kept apart from absent, and the UI should keep them apart too. The
+        // old dashboard added them and reported the whole company absent every
+        // morning until somebody started marking.
+        notMarkedToday: data.not_marked_today,
+
+        // Derived from the weekly-off policy, not counted — the system does
+        // not create attendance rows for days nobody works. Reporting zero
+        // would say everybody was absent on a Sunday.
+        isWeeklyOffToday: data.is_weekly_off_today,
+        weeklyOffToday: data.weekly_off_today,
+
+        pendingLeaveCount: data.pending_leave_count,
+        pendingLeaves: data.pending_leaves,
+
+        deptData: data.by_department.map((d) => ({
+          name: d.department,
+          value: d.headcount,
+          present: d.present_today,
+        })),
+
+        // Same derivation, per department: on a weekly off the whole department
+        // is off, and on any other day none of it is.
+        deptWeeklyOff: data.is_weekly_off_today
+          ? data.by_department.map((d) => ({ name: d.department, value: d.headcount }))
+          : [],
+
+        weekData: data.this_week.map((d) => ({
+          date: d.date,
+          day: new Date(`${d.date}T00:00:00Z`).toLocaleDateString('en-IN', {
+            weekday: 'short',
+            timeZone: 'UTC',
+          }),
+          present: d.present,
+          absent: d.absent,
+          onLeave: d.on_leave,
+        })),
+
+        recentJoiners: data.recent_joiners,
       }
     },
   })
 }
 
+/** Approving straight from the dashboard's pending list. */
 export function useApproveLeaveDashboard() {
-  const qc = useQueryClient()
+  const queryClient = useQueryClient()
+
   return useMutation({
-    mutationFn: async ({ id, status }) => {
-      // Who is signed in is now our own session, not a Supabase one. The
-      // data queries below still go to Supabase until this module is cut
-      // over on its own day.
-      const { user } = useAuthStore.getState()
-
-      const { data: req } = await supabase
-        .from('leave_requests')
-        .select('employee_id, leave_type, days')
-        .eq('id', id)
-        .single()
-
-      const { error } = await supabase
-        .from('leave_requests')
-        .update({ status, reviewed_by: user?.id, reviewed_at: new Date().toISOString() })
-        .eq('id', id)
-      if (error) throw error
-
-      if (req?.employee_id) {
-        const leaveLabel = req.leave_type ? `${req.leave_type.charAt(0).toUpperCase() + req.leave_type.slice(1)} Leave` : 'Leave'
-        const isApproved = status === 'approved'
-
-        await sendNotification({
-          userId: req.employee_id,
-          title: `Leave Request ${isApproved ? 'Approved' : 'Rejected'}`,
-          message: `Your ${leaveLabel} request for ${req.days || 1} day(s) has been ${status}.`,
-          type: 'leave',
-          link: '/leave'
-        })
-      }
+    mutationFn: async ({ id, status, note }) => {
+      const action = status === 'approved' ? 'approve' : 'reject'
+      return (await api.post(`/leave-requests/${id}/${action}`, note ? { note } : {})).data
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['dashboard_stats'] })
-      qc.invalidateQueries({ queryKey: ['leave_requests'] })
-      qc.invalidateQueries({ queryKey: ['notifications'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+      queryClient.invalidateQueries({ queryKey: ['leave'] })
+      queryClient.invalidateQueries({ queryKey: ['attendance'] })
     },
   })
 }
 
+/** The employee's own view. */
 export function useMyDashboardStats() {
-  const today = new Date().toISOString().split('T')[0]
-  const monthStart = today.slice(0, 8) + '01'
-
   return useQuery({
-    queryKey: ['my_dashboard', today],
+    queryKey: keys.me,
     queryFn: async () => {
-      // Who is signed in is now our own session, not a Supabase one. The
-      // data queries below still go to Supabase until this module is cut
-      // over on its own day.
-      const { user } = useAuthStore.getState()
-      if (!user) throw new Error('Not authenticated')
-
-      const [
-        { data: profile },
-        { data: myAttendance },
-        { data: myLeaves },
-        { data: leaveBalances },
-      ] = await Promise.all([
-        supabase.from('profiles').select('full_name, designation, department, date_of_joining').eq('id', user.id).single(),
-        supabase.from('attendance').select('date, status').eq('employee_id', user.id).gte('date', monthStart).lte('date', today),
-        supabase.from('leave_requests').select('*').eq('employee_id', user.id).order('applied_on', { ascending: false }).limit(5),
-        supabase.from('leave_balances').select('*').eq('employee_id', user.id),
-      ])
-
-      const presentDays = myAttendance?.filter(a => a.status === 'present' || a.status === 'wfh').length ?? 0
-      const absentDays = myAttendance?.filter(a => a.status === 'absent').length ?? 0
-      const leaveDays = myAttendance?.filter(a => a.status === 'on_leave').length ?? 0
-      const weeklyOffDays = myAttendance?.filter(a => a.status === 'weekly_off').length ?? 0
-      const todayRecord = myAttendance?.find(a => a.date === today)
-
-      const rawBalances = leaveBalances?.[0] || {}
-      const mappedBalances = [
-        { id: 'casual', leave_type: 'casual', remaining_days: rawBalances.casual ?? 12, total_days: 12 },
-        { id: 'sick', leave_type: 'sick', remaining_days: rawBalances.sick ?? 12, total_days: 12 },
-        { id: 'earned', leave_type: 'earned', remaining_days: rawBalances.earned ?? 18, total_days: 18 },
-        { id: 'wfh', leave_type: 'wfh', remaining_days: rawBalances.wfh ?? 24, total_days: 24 },
-        { id: 'comp_off', leave_type: 'comp_off', remaining_days: rawBalances.comp_off ?? 5, total_days: 5 },
-      ]
+      const { data } = await api.get('/dashboard/me')
 
       return {
-        profile,
-        presentDays,
-        absentDays,
-        leaveDays,
-        weeklyOffDays,
-        todayStatus: todayRecord?.status ?? null,
-        recentLeaves: myLeaves ?? [],
-        leaveBalances: mappedBalances,
+        profile: data.profile,
+
+        presentDays: data.this_month.present_days,
+        halfDays: data.this_month.half_days,
+        absentDays: data.this_month.absent_days,
+        leaveDays: data.this_month.leave_days,
+        // The figure the client asked for. Summed on the server from stored
+        // hours, so it matches the attendance page and the payslip.
+        totalHours: data.this_month.total_hours,
+
+        // Weekly offs are not counted as attendance rows, so this is no longer
+        // a figure the dashboard can report. Zero rather than a guess.
+        weeklyOffDays: 0,
+
+        todayStatus: data.today.status,
+        today: data.today,
+
+        recentLeaves: data.recent_leaves,
+
+        // Straight from the ledger. No `?? 12`.
+        leaveBalances: data.leave_balances,
       }
     },
   })
-}
-
-function getPastMonday() {
-  const d = new Date()
-  const day = d.getDay()
-  const diff = day === 0 ? 6 : day - 1
-  d.setDate(d.getDate() - diff)
-  return d.toISOString().split('T')[0]
 }

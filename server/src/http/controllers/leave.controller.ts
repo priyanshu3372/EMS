@@ -13,7 +13,9 @@ import {
   leaveQuerySchema,
   balanceQuerySchema,
   leaveIdSchema,
+  leaveDecisionSchema,
 } from '../validators/leave.validator'
+import { approveLeave, rejectLeave, reverseLeave } from '../../modules/leave/leaveApproval.service'
 import { parseBody } from '../validators/parse'
 import { appContext } from '../context'
 import type { LeaveRequestRow } from '../../modules/leave/leave.repository'
@@ -145,4 +147,47 @@ export const deleteLeave: RequestHandler = async (req, res) => {
   const cancelled = await cancelLeave(ctx, id)
 
   res.status(200).json({ data: request(cancelled), meta: { requestId: res.locals.requestId } })
+}
+
+/**
+ * POST /api/leave-requests/:id/approve
+ *
+ * The balance moves here, in the same transaction as the status change — so
+ * there is no moment where the request says approved and the ledger disagrees.
+ */
+export const postApprove: RequestHandler = async (req, res) => {
+  const ctx = appContext(res)
+  const { id } = parseBody(leaveIdSchema, req.params)
+  const { note } = parseBody(leaveDecisionSchema, req.body ?? {})
+
+  const decided = await approveLeave(ctx, id, note ?? undefined)
+
+  res.status(200).json({ data: request(decided), meta: { requestId: res.locals.requestId } })
+}
+
+/** POST /api/leave-requests/:id/reject */
+export const postReject: RequestHandler = async (req, res) => {
+  const ctx = appContext(res)
+  const { id } = parseBody(leaveIdSchema, req.params)
+  const { note } = parseBody(leaveDecisionSchema, req.body ?? {})
+
+  const decided = await rejectLeave(ctx, id, note ?? undefined)
+
+  res.status(200).json({ data: request(decided), meta: { requestId: res.locals.requestId } })
+}
+
+/**
+ * POST /api/leave-requests/:id/reverse
+ *
+ * Undoing an approval. The days come back through a reversing entry rather
+ * than by deleting the one that took them, so both facts survive.
+ */
+export const postReverse: RequestHandler = async (req, res) => {
+  const ctx = appContext(res)
+  const { id } = parseBody(leaveIdSchema, req.params)
+  const { note } = parseBody(leaveDecisionSchema, req.body ?? {})
+
+  const reversed = await reverseLeave(ctx, id, note ?? undefined)
+
+  res.status(200).json({ data: request(reversed), meta: { requestId: res.locals.requestId } })
 }
