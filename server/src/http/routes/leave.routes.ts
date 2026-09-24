@@ -5,6 +5,9 @@ import {
   getLeave,
   getBalances,
   deleteLeave,
+  postApprove,
+  postReject,
+  postReverse,
 } from '../controllers/leave.controller'
 import { authenticate } from '../middleware/authenticate'
 import { authorize } from '../middleware/authorize'
@@ -32,3 +35,10 @@ leaveRouter.delete('/:id', authorize('leave:apply'), deleteLeave)
 
 leaveRouter.get('/balances', authorize('leave:read'), getBalances)
 leaveRouter.get('/', authorize('leave:read'), getLeave)
+
+// Deciding. A different permission from applying, because approving your
+// team's leave and taking your own are not the same right — and the scope
+// narrows it further, so a manager cannot decide outside their team.
+leaveRouter.post('/:id/approve', authorize('leave:approve'), postApprove)
+leaveRouter.post('/:id/reject', authorize('leave:approve'), postReject)
+leaveRouter.post('/:id/reverse', authorize('leave:approve'), postReverse)

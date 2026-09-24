@@ -43,3 +43,16 @@ export const balanceQuerySchema = z.object({
 export const leaveIdSchema = z.object({
   id: z.uuid('That is not a valid leave request id'),
 })
+
+/**
+ * Approving, rejecting or reversing.
+ *
+ * The note is optional for an approval and, in practice, the thing an employee
+ * reads first on a rejection. Not enforced as required, because forcing a
+ * sentence produces "ok" — but the UI should ask for one.
+ */
+export const leaveDecisionSchema = z
+  .object({
+    note: z.string().trim().max(500).nullish(),
+  })
+  .strict()
