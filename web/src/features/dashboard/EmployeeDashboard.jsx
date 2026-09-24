@@ -1,6 +1,7 @@
 import { UserCheck, CalendarDays, Clock, TrendingUp, CheckCircle, XCircle, AlertCircle } from 'lucide-react'
 import { useMyDashboardStats } from '../../hooks/useDashboard'
 import PunchCard from '../attendance/PunchCard'
+import { useAuthStore } from '../../stores/authStore'
 
 const LEAVE_TYPE_LABELS = {
   sick: 'Sick Leave', casual: 'Casual Leave', earned: 'Earned Leave',
@@ -28,6 +29,8 @@ function formatDate(str) {
 
 export default function EmployeeDashboard() {
   const { data, isLoading, error } = useMyDashboardStats()
+  // Read before the early returns below — a hook cannot be called conditionally.
+  const attendanceMode = useAuthStore((state) => state.profile?.attendance_mode)
 
   const today = new Date().toLocaleDateString('en-IN', {
     weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
@@ -68,13 +71,19 @@ export default function EmployeeDashboard() {
       </div>
 
       {/*
-        Check In / Check Out, first thing on the page.
+        Check In / Check Out, first thing on the page — and only for staff
+        whose attendance comes from the app.
+
+        A biometric employee punches at the machine, and a manual one is marked
+        by HR. Showing either of them a button they must not use is worse than
+        showing nothing: they press it, it works, and now there are two records
+        of the same day from two different sources.
 
         The client asked for the punch to update the dashboard the moment it
         happens; the card invalidates the dashboard query on success, so the
         figures below refresh without a reload.
       */}
-      <PunchCard />
+      {attendanceMode === 'app' && <PunchCard />}
 
       {/* Profile banner */}
       <div className="bg-gradient-to-r from-blue-600 to-blue-700 rounded-xl p-5 text-white flex items-center gap-4">

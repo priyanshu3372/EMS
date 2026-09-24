@@ -33,6 +33,10 @@ export function serializeSessionUser(identity: AuthIdentity) {
           id: identity.employee.id,
           fullName: identity.employee.fullName,
           employeeCode: identity.employee.employeeCode,
+          // Drives whether the app shows a Check In button at all. A biometric
+          // employee punches at the machine; offering them a button they must
+          // not use is worse than offering nothing.
+          attendanceMode: identity.employee.attendanceMode,
         }
       : null,
   }

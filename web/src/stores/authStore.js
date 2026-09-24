@@ -28,6 +28,7 @@ function toProfile(session) {
     id: session.employee.id,
     full_name: session.employee.fullName,
     employee_id: session.employee.employeeCode,
+    attendance_mode: session.employee.attendanceMode,
     email: session.email,
     role: session.role,
   }
