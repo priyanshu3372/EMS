@@ -8,7 +8,13 @@ import {
 } from '../../modules/auth/session.service'
 import { findIdentityByUserId } from '../../modules/auth/auth.repository'
 import { Unauthorized } from '../../platform/errors/AppError'
-import { loginSchema, changePasswordSchema } from '../validators/auth.validator'
+import {
+  loginSchema,
+  changePasswordSchema,
+  inspectLinkSchema,
+  redeemLinkSchema,
+} from '../validators/auth.validator'
+import { inspectLink, redeemLink } from '../../modules/auth/invite.service'
 import { parseBody } from '../validators/parse'
 import { setRefreshCookie, clearRefreshCookie, REFRESH_COOKIE } from '../cookies'
 import { serializeSessionUser } from '../serializers/session.serializer'
@@ -143,6 +149,43 @@ export const postChangePassword: RequestHandler = async (req, res) => {
       accessToken: session.accessToken,
       user: serializeSessionUser(session.identity),
     },
+    meta: { requestId: res.locals.requestId },
+  })
+}
+
+/**
+ * POST /api/auth/password-link/inspect
+ *
+ * What a link is for, before anybody chooses a password. POST rather than GET
+ * so the token travels in a body — a query string lands in access logs.
+ */
+export const postInspectLink: RequestHandler = async (req, res) => {
+  const { token } = parseBody(inspectLinkSchema, req.body)
+  const link = await inspectLink(token)
+
+  res.status(200).json({
+    data: {
+      email: link.email,
+      purpose: link.purpose,
+      expires_at: link.expiresAt.toISOString(),
+    },
+    meta: { requestId: res.locals.requestId },
+  })
+}
+
+/**
+ * POST /api/auth/password-link/redeem
+ *
+ * Sets the password and spends the link. Does NOT sign the person in: the next
+ * screen asks for the password they just chose, which is the first time anyone
+ * finds out whether they typed what they meant to.
+ */
+export const postRedeemLink: RequestHandler = async (req, res) => {
+  const { token, password } = parseBody(redeemLinkSchema, req.body)
+  const result = await redeemLink(token, password)
+
+  res.status(200).json({
+    data: { email: result.email, purpose: result.purpose },
     meta: { requestId: res.locals.requestId },
   })
 }

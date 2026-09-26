@@ -41,3 +41,32 @@ export const esiRedecideSchema = z
     month,
   })
   .strict()
+
+/** An employee id in the path. A non-uuid is a 422, never a database round trip. */
+export const payrollEmployeeParamSchema = z.object({
+  id: z.uuid('That is not a valid employee id'),
+})
+
+/**
+ * A salary structure: when it starts, the annual CTC, and the monthly amount of
+ * each fixed component, by code.
+ */
+export const salaryStructureSchema = z
+  .object({
+    effectiveFrom: z.iso.date('Choose the date this salary starts'),
+    // Typo guards, not pay policy: a crore a month is not a salary anybody here
+    // is entering by hand.
+    ctc: z.number().min(0).max(1_000_000_000),
+    components: z
+      .array(
+        z
+          .object({
+            code: z.string().regex(/^[A-Z0-9_]{1,20}$/, 'A component code, such as BASIC'),
+            amount: z.number().min(0).max(10_000_000),
+          })
+          .strict(),
+      )
+      .min(1, 'Enter at least one component')
+      .max(30),
+  })
+  .strict()

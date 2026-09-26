@@ -6,6 +6,7 @@ import {
   todaySummary,
   markAttendance,
   amendAttendance,
+  dayRoster,
 } from '../../modules/attendance/attendanceAdmin.service'
 import { importAttendance } from '../../modules/attendance/attendanceImport.service'
 import {
@@ -22,22 +23,13 @@ import { appContext } from '../context'
 import type { AttendanceRow } from '../../modules/attendance/attendance.repository'
 
 /** Snake_case out, matching the names the Attendance page already reads. */
-function row(record: AttendanceRow) {
+/** The day itself, without who it belongs to. Shared by the list and the roster. */
+function dayFields(record: Omit<AttendanceRow, 'employee'>) {
   const num = (value: Prisma.Decimal | null) => (value == null ? null : Number(value))
 
   return {
     id: record.id,
     date: record.date.toISOString().slice(0, 10),
-    // employee_id is the UUID, matching what attendance.employee_id meant under
-    // Supabase — the Attendance page joins on it (Attendance.jsx:123). The
-    // human-readable code is employee_code. Confusing, and not ours to rename
-    // in the same commit that moves the data: one change at a time.
-    employee_id: record.employeeId,
-    employee_code: record.employee.employeeCode,
-    full_name: record.employee.fullName,
-    department: record.employee.department?.name ?? null,
-    designation: record.employee.designation?.name ?? null,
-    attendance_mode: record.employee.attendanceMode,
 
     check_in: record.checkIn?.toISOString() ?? null,
     check_out: record.checkOut?.toISOString() ?? null,
@@ -54,6 +46,52 @@ function row(record: AttendanceRow) {
 
     note: record.note,
   }
+}
+
+function row(record: AttendanceRow) {
+  return {
+    ...dayFields(record),
+    // employee_id is the UUID, matching what attendance.employee_id meant under
+    // Supabase. The human-readable code is employee_code. Confusing, and not
+    // ours to rename in the same commit that moves the data.
+    employee_id: record.employeeId,
+    employee_code: record.employee.employeeCode,
+    full_name: record.employee.fullName,
+    department: record.employee.department?.name ?? null,
+    designation: record.employee.designation?.name ?? null,
+    attendance_mode: record.employee.attendanceMode,
+  }
+}
+
+/**
+ * GET /api/attendance/day?date=
+ *
+ * The roster for one day: every employee the caller may see who was employed
+ * that day, each with their row — or `attendance: null`, which means NOT
+ * MARKED. Not absent: nobody has said anything about that person yet, and the
+ * page must be able to tell the two apart.
+ */
+export const getDayRoster: RequestHandler = async (req, res) => {
+  const ctx = appContext(res)
+  const { date } = parseBody(daySummaryQuerySchema, req.query)
+
+  const roster = await dayRoster(ctx, date)
+
+  res.status(200).json({
+    data: {
+      date: roster.date,
+      employees: roster.employees.map((employee) => ({
+        employee_id: employee.id,
+        employee_code: employee.employeeCode,
+        full_name: employee.fullName,
+        department: employee.department?.name ?? null,
+        designation: employee.designation?.name ?? null,
+        attendance_mode: employee.attendanceMode,
+        attendance: employee.attendance[0] ? dayFields(employee.attendance[0]) : null,
+      })),
+    },
+    meta: { requestId: res.locals.requestId },
+  })
 }
 
 /** GET /api/attendance */

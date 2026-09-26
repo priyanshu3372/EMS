@@ -7,6 +7,7 @@ import { ROUTE_PERMISSIONS } from './config/navigation'
 import Layout from './components/Layout'
 import ProtectedRoute from './components/ProtectedRoute'
 import SignIn from './pages/SignIn'
+import SetPassword from './pages/SetPassword'
 import Dashboard from './pages/Dashboard'
 import Employees from './pages/Employees'
 import Attendance from './pages/Attendance'
@@ -53,6 +54,8 @@ export default function App() {
   return (
     <Routes>
       <Route path="/signin" element={<SignIn />} />
+      {/* Public: whoever opens an invitation is, by definition, not signed in. */}
+      <Route path="/set-password" element={<SetPassword />} />
 
       <Route element={<Layout />}>
         {/* Everyone who is signed in. */}

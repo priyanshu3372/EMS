@@ -384,6 +384,26 @@ describe('NONE of them can log in until they set a password', () => {
     }
   })
 
+  it('lets each of them in once they set a password with their own link', async () => {
+    // The other half of the rule, and the half that was missing: "until they
+    // set a password" used to mean "for ever", because nothing accepted the
+    // link. Each imported person redeems their own and can then sign in.
+    const res = await upload(csv, false)
+    const chosen = 'MyOwnFirstPassword1'
+
+    for (const invite of res.body.data.invites) {
+      const accepted = await request(app)
+        .post('/api/auth/password-link/redeem')
+        .send({ token: invite.token, password: chosen })
+      expect(accepted.status, JSON.stringify(accepted.body)).toBe(200)
+
+      const signedIn = await request(app)
+        .post('/api/auth/login')
+        .send({ identifier: invite.email, password: chosen })
+      expect(signedIn.status, `${invite.email} should sign in after accepting`).toBe(200)
+    }
+  })
+
   it('imports an employee with no email at all, and gives them no login', async () => {
     const noEmail = [HEADER, `${PREFIX}-E3,Site Worker,,,,,,`].join('\n')
     await upload(noEmail, false)

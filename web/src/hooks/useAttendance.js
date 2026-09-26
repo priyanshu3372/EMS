@@ -19,6 +19,7 @@ import { api } from '../api/http'
 
 const keys = {
   day: (date) => ['attendance', 'day', date],
+  roster: (date) => ['attendance', 'roster', date],
   month: (year, month) => ['attendance', 'month', year, month],
   summary: (date) => ['attendance', 'summary', date ?? 'today'],
   monthly: (year, month) => ['attendance', 'monthly-summary', year, month],
@@ -43,6 +44,22 @@ export function useAttendance(date) {
  * `year` and `month` go to the server as numbers and the range is built there,
  * so there is no date string for anyone to get wrong.
  */
+/**
+ * One day's roster: everybody the caller may see who was employed that day,
+ * each with `attendance` — or `attendance: null`, which means NOT MARKED.
+ *
+ * Built by the server under one scope. The page used to build it itself, from
+ * a separate employee list whose ids came from a different system, and the
+ * two never matched: people who had punched in showed as unmarked.
+ */
+export function useDayRoster(date) {
+  return useQuery({
+    queryKey: keys.roster(date),
+    queryFn: async () => (await api.get(`/attendance/day?date=${date}`)).data,
+    enabled: !!date,
+  })
+}
+
 export function useMonthAttendance(year, month) {
   return useQuery({
     queryKey: keys.month(year, month),

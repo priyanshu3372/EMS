@@ -1,7 +1,14 @@
 import type { RequestHandler } from 'express'
 import * as payroll from '../../modules/payroll/payroll.service'
 import { redecide, type Coverage } from '../../modules/payroll/esiCoverage.service'
-import { calculationSchema, esiRedecideSchema } from '../validators/payroll.validator'
+import {
+  calculationSchema,
+  esiRedecideSchema,
+  payrollEmployeeParamSchema,
+  salaryStructureSchema,
+} from '../validators/payroll.validator'
+import * as salary from '../../modules/payroll/salaryStructure.service'
+import { fromDateColumn } from '../../domain/shared/dates'
 import { parseBody } from '../validators/parse'
 import { appContext } from '../context'
 
@@ -136,4 +143,80 @@ export const postEsiRedecide: RequestHandler = async (req, res) => {
 
   const coverage = await redecide(ctx, input.employeeId, input.year, input.month)
   ok(res, coveragePayload(coverage))
+}
+
+type SalaryRecord = ReturnType<typeof salary.toRecord>
+
+function salaryPayload(record: SalaryRecord) {
+  return {
+    effective_from: record.effectiveFrom,
+    effective_to: record.effectiveTo,
+    ctc: record.ctc,
+    gross_monthly: record.grossMonthly,
+    components: record.components,
+  }
+}
+
+/**
+ * GET /api/payroll/employees
+ *
+ * Everybody on the payroll with their current salary, or `salary: null` —
+ * which means NONE RECORDED, and is exactly the list Accounts has to work
+ * through before the first payroll run.
+ */
+export const getSalaryRoster: RequestHandler = async (_req, res) => {
+  const ctx = appContext(res)
+  const rows = await salary.roster(ctx)
+
+  ok(
+    res,
+    rows.map((employee) => {
+      const current = employee.financials[0]
+      return {
+        employee_id: employee.id,
+        employee_code: employee.employeeCode,
+        full_name: employee.fullName,
+        department: employee.department?.name ?? null,
+        designation: employee.designation?.name ?? null,
+        date_of_joining: employee.dateOfJoining ? fromDateColumn(employee.dateOfJoining) : null,
+        last_working_date: employee.lastWorkingDate ? fromDateColumn(employee.lastWorkingDate) : null,
+        salary: current ? salaryPayload(salary.toRecord(current)) : null,
+      }
+    }),
+  )
+}
+
+/** GET /api/payroll/employees/:id/salary — every salary this person has had. */
+export const getSalaryHistory: RequestHandler = async (req, res) => {
+  const ctx = appContext(res)
+  const { id } = parseBody(payrollEmployeeParamSchema, req.params)
+  const result = await salary.history(ctx, id)
+
+  ok(res, {
+    employee_id: result.employee.id,
+    full_name: result.employee.fullName,
+    date_of_joining: result.employee.dateOfJoining ? fromDateColumn(result.employee.dateOfJoining) : null,
+    history: result.history.map(salaryPayload),
+  })
+}
+
+/**
+ * PUT /api/payroll/employees/:id/salary
+ *
+ * Sets a salary from a date. A later date is a raise (the old record closes
+ * the day before); the same date as the current record is a correction.
+ */
+export const putSalary: RequestHandler = async (req, res) => {
+  const ctx = appContext(res)
+  const { id } = parseBody(payrollEmployeeParamSchema, req.params)
+  const input = parseBody(salaryStructureSchema, req.body)
+
+  const result = await salary.setSalary(ctx, id, input)
+
+  ok(res, {
+    employee_id: result.employee.id,
+    full_name: result.employee.fullName,
+    date_of_joining: result.employee.dateOfJoining ? fromDateColumn(result.employee.dateOfJoining) : null,
+    history: result.history.map(salaryPayload),
+  })
 }

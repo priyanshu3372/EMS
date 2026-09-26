@@ -4,7 +4,7 @@ import { createApp } from '../../app'
 import { prisma } from '../../platform/db/prisma'
 import { hashPassword } from '../../platform/auth/password'
 import { monthRange } from './attendance.repository'
-import { toDateColumn } from '../../domain/shared/dates'
+import { toDateColumn, zonedToday } from '../../domain/shared/dates'
 
 /**
  * Attendance as HR and managers see it: lists, monthly hours, corrections and
@@ -451,5 +451,90 @@ describe('biometric CSV import', () => {
   it('refuses a manager', async () => {
     const csv = [HEADER, `${PREFIX}-alice,01/04/2026,09:30,18:30`].join('\n')
     expect((await upload(csv, false, 'mgr')).status).toBe(403)
+  })
+})
+
+describe('the day roster', () => {
+  const DATE = '2026-09-14'
+  const names = (res: { body: { data: { employees: { full_name: string }[] } } }) =>
+    res.body.data.employees.map((e: { full_name: string }) => e.full_name).sort()
+
+  it('lists everybody, and says who has not been marked rather than calling them absent', async () => {
+    await day(aliceId, DATE, 8)
+
+    const res = await get(`/day?date=${DATE}`)
+    expect(res.status).toBe(200)
+    expect(res.body.data.date).toBe(DATE)
+    expect(res.body.data.employees).toHaveLength(5)
+
+    const alice = res.body.data.employees.find((e: { employee_id: string }) => e.employee_id === aliceId)
+    expect(alice.attendance.status).toBe('present')
+    expect(alice.attendance.hours_worked).toBe(8)
+
+    // Null is "nobody has said", which the page shows as not marked. The old
+    // page matched on ids from two different systems and showed EVERYONE this
+    // way, including people who had punched in.
+    const bob = res.body.data.employees.find((e: { employee_id: string }) => e.employee_id === bobId)
+    expect(bob.attendance).toBeNull()
+  })
+
+  it("gives a manager their own team and nobody else's", async () => {
+    const res = await get(`/day?date=${DATE}`, 'mgr')
+
+    expect(res.status).toBe(200)
+    expect(names(res)).toEqual(['alice person', 'bob person', 'mgr person'])
+  })
+
+  it('gives an employee only themselves', async () => {
+    const res = await get(`/day?date=${DATE}`, 'alice')
+
+    expect(res.status).toBe(200)
+    expect(names(res)).toEqual(['alice person'])
+  })
+
+  it('leaves out somebody who had not joined yet, or had already left', async () => {
+    const [future, gone] = await Promise.all([
+      prisma.employee.create({
+        data: {
+          organizationId: orgId,
+          employeeCode: `${PREFIX}-future`,
+          fullName: 'Joins Later',
+          dateOfJoining: toDateColumn('2026-10-01'),
+        },
+      }),
+      prisma.employee.create({
+        data: {
+          organizationId: orgId,
+          employeeCode: `${PREFIX}-gone`,
+          fullName: 'Left Earlier',
+          dateOfJoining: toDateColumn('2024-01-01'),
+          lastWorkingDate: toDateColumn('2026-08-31'),
+        },
+      }),
+    ])
+
+    try {
+      const res = await get(`/day?date=${DATE}`)
+      expect(names(res)).not.toContain('Joins Later')
+      expect(names(res)).not.toContain('Left Earlier')
+
+      // And the same two ARE there on a day they were employed.
+      const earlier = await get('/day?date=2026-08-20')
+      expect(names(earlier)).toContain('Left Earlier')
+      const later = await get('/day?date=2026-10-05')
+      expect(names(later)).toContain('Joins Later')
+    } finally {
+      await prisma.employee.deleteMany({ where: { id: { in: [future.id, gone.id] } } })
+    }
+  })
+
+  it("defaults to the company's today, not UTC's", async () => {
+    const res = await get('/day')
+    expect(res.status).toBe(200)
+    expect(res.body.data.date).toBe(zonedToday(new Date(), 'Asia/Kolkata'))
+  })
+
+  it('refuses a date it cannot read', async () => {
+    expect((await get('/day?date=14-09-2026')).status).toBe(422)
   })
 })

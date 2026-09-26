@@ -135,6 +135,18 @@ export async function todaySummary(ctx: AppContext, date?: string) {
   return repo.daySummary(ctx.db, ctx.scopeFor('attendance'), day)
 }
 
+/**
+ * One day's roster: everybody in scope who was employed that day, with their
+ * row or none. The company's today unless a date is given — never UTC's.
+ */
+export async function dayRoster(ctx: AppContext, date?: string) {
+  const day = date ?? zonedToday(new Date(), await timezone(ctx))
+  if (!isCalendarDate(day)) throw BadRequest(`"${day}" is not a date`)
+
+  const employees = await repo.dayRoster(ctx.db, ctx.scopeFor('attendance'), day)
+  return { date: day, employees }
+}
+
 export interface MarkInput {
   employeeId: string
   date: CalendarDate

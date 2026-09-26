@@ -337,3 +337,66 @@ export async function createLoginInTransaction(
 
   return { membershipId: membership.id, inviteToken: rawToken, expiresAt }
 }
+
+export interface PasswordLinkResult {
+  membership: repo.MembershipRow
+  token: string
+  expiresAt: Date
+  purpose: 'invite' | 'reset'
+}
+
+/**
+ * A new link for somebody: their invitation again, or a password reset.
+ *
+ * Which one depends on where the account stands. Still `invited` — the first
+ * link expired, or was lost — and this is that invitation again. Already
+ * `active` and it is a reset, the only way back in after a forgotten password
+ * while there is no email to send one by.
+ *
+ * A reset link is a key to somebody else's account: whoever holds it can set
+ * the password and sign in as them. So the same rule as handing out roles
+ * applies — not for an account with more access than your own — and the log
+ * records who issued it. Their current sessions are NOT ended here, only when
+ * the link is used; otherwise issuing a link would sign somebody out whether or
+ * not they ever needed it.
+ */
+export async function issuePasswordLink(
+  ctx: AppContext,
+  membershipId: string,
+): Promise<PasswordLinkResult> {
+  const target = await repo.findMembership(ctx.db, membershipId)
+  if (!target) throw NotFound('User not found')
+
+  if (target.id === ctx.membershipId) {
+    throw BadRequest('Use Change password to change your own password.')
+  }
+
+  if (target.status === 'inactive') {
+    throw Conflict('This account is deactivated. Reactivate it before issuing a link.')
+  }
+
+  if (grantsMoreThan(target.role, ctx.role)) {
+    throw Forbidden('You cannot issue a link for an account with more access than your own.')
+  }
+
+  const purpose = target.status === 'invited' ? 'invite' : 'reset'
+  const token = generateToken()
+  const expiresAt = new Date(Date.now() + INVITE_VALID_FOR_HOURS * 60 * 60 * 1000)
+
+  await repo.replacePasswordLink(ctx.db, {
+    userId: target.userId,
+    tokenHash: hashInviteToken(token),
+    expiresAt,
+    purpose,
+    createdByUserId: ctx.userId,
+  })
+
+  logger.warn('Password link issued', {
+    by: ctx.userId,
+    forUserId: target.userId,
+    purpose,
+    organizationId: ctx.organizationId,
+  })
+
+  return { membership: target, token, expiresAt, purpose }
+}

@@ -1,35 +1,45 @@
 import { useState, useMemo } from 'react'
-import { Search, Plus, Filter, Download, MoreVertical, ChevronUp, ChevronDown } from 'lucide-react'
+import { Search, Plus, Filter, Download, Upload, MoreVertical, ChevronUp, ChevronDown } from 'lucide-react'
 import AddEmployeeModal from '../features/employees/AddEmployeeModal'
 import EmployeeDrawer from '../features/employees/EmployeeDrawer'
-import { useEmployees, useUpdateEmployee } from '../hooks/useEmployees'
+import ImportEmployeesModal from '../features/employees/ImportEmployeesModal'
+import { useEmployees } from '../hooks/useEmployees'
+import { useAuthStore } from '../stores/authStore'
+import { calendarDayIn } from '../lib/dates'
 
-const DEPARTMENTS = ['All', 'Engineering', 'Sales', 'HR', 'Finance', 'Operations', 'Marketing', 'Design', 'Product']
 const STATUS_OPTIONS = ['All', 'active', 'inactive']
 
 const STATUS_CLASS = {
   active: 'bg-green-100 text-green-700',
   inactive: 'bg-red-100 text-red-600',
 }
-const EMP_TYPE_CLASS = {
-  'Full-time': 'bg-blue-100 text-blue-700',
-  'Part-time': 'bg-amber-100 text-amber-700',
-  Contract: 'bg-purple-100 text-purple-700',
-  Intern: 'bg-teal-100 text-teal-700',
+/** The server's values, with the labels people read. */
+const EMP_TYPE = {
+  full_time: { label: 'Full-time', cls: 'bg-blue-100 text-blue-700' },
+  part_time: { label: 'Part-time', cls: 'bg-amber-100 text-amber-700' },
+  contract: { label: 'Contract', cls: 'bg-purple-100 text-purple-700' },
+  intern: { label: 'Intern', cls: 'bg-teal-100 text-teal-700' },
+}
+
+/** A CSV cell. Quotes inside a value are doubled, or one comma-laden name breaks the row. */
+function cell(value) {
+  return `"${String(value ?? '').replace(/"/g, '""')}"`
 }
 
 function initials(name) {
   return (name || '').split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()
 }
 
-function formatDate(str) {
-  if (!str) return '—'
-  return new Date(str).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+function formatDate(day) {
+  if (!day) return '—'
+  return new Date(`${day}T00:00:00Z`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
 }
 
 export default function Employees() {
   const { data: employees = [], isLoading } = useEmployees()
-  const updateEmployee = useUpdateEmployee()
+  const timezone = useAuthStore((state) => state.organization?.timezone)
+  const canCreate = useAuthStore((state) => state.can('employee:create'))
+  const canUpdate = useAuthStore((state) => state.can('employee:update'))
 
   const [search, setSearch] = useState('')
   const [deptFilter, setDeptFilter] = useState('All')
@@ -40,6 +50,14 @@ export default function Employees() {
   const [editTarget, setEditTarget] = useState(null)
   const [drawerEmp, setDrawerEmp] = useState(null)
   const [menuOpenId, setMenuOpenId] = useState(null)
+  const [importOpen, setImportOpen] = useState(false)
+
+  // The company's own departments, from the people in the list — not a list
+  // typed into this page that named departments the company does not have.
+  const departments = useMemo(
+    () => ['All', ...[...new Set(employees.map((e) => e.department).filter(Boolean))].sort()],
+    [employees],
+  )
 
   const filtered = useMemo(() => {
     let list = employees
@@ -74,30 +92,26 @@ export default function Employees() {
   function openEdit(emp) { setEditTarget(emp); setModalOpen(true); setDrawerEmp(null) }
   function openDrawer(emp) { setDrawerEmp(emp); setMenuOpenId(null) }
 
-  function handleDeactivate(emp) {
-    const newStatus = emp.status === 'active' ? 'inactive' : 'active'
-    updateEmployee.mutate({ id: emp.id, status: newStatus })
-    setMenuOpenId(null)
-  }
-
   function handleExport() {
-    const headers = ['Full Name', 'Employee ID', 'Department', 'Designation', 'Phone', 'Employment Type', 'Date of Joining', 'Status', 'CTC']
+    const headers = ['Full Name', 'Employee Code', 'Department', 'Designation', 'Phone', 'Employment Type', 'Date of Joining', 'Status', 'CTC']
     const rows = filtered.map((e) => [
-      e.full_name || '',
-      e.employee_id || '',
-      e.department || '',
-      e.designation || '',
-      e.phone || '',
-      e.employment_type || '',
-      e.date_of_joining || '',
-      e.status || '',
-      e.ctc || 0,
+      e.full_name,
+      e.employee_id,
+      e.department,
+      e.designation,
+      e.phone,
+      EMP_TYPE[e.employment_type]?.label ?? e.employment_type,
+      e.date_of_joining,
+      e.status,
+      // Blank when unknown or not permitted — never 0, which would read as a
+      // salary of nothing.
+      e.ctc ?? '',
     ])
-    const lines = [headers.join(','), ...rows.map((r) => r.map((v) => `"${v}"`).join(','))]
+    const lines = [headers.map(cell).join(','), ...rows.map((r) => r.map(cell).join(','))]
     const blob = new Blob([lines.join('\n')], { type: 'text/csv' })
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob)
-    a.download = `employees_${new Date().toISOString().slice(0, 10)}.csv`
+    a.download = `employees_${calendarDayIn(timezone)}.csv`
     a.click()
   }
 
@@ -116,11 +130,20 @@ export default function Employees() {
               <Download className="w-4 h-4" />
               Export
             </button>
-            <button onClick={openAdd}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition-colors">
-              <Plus className="w-4 h-4" />
-              Add Employee
-            </button>
+            {canCreate && (
+              <button onClick={() => setImportOpen(true)}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 text-sm font-medium text-gray-700 transition-colors">
+                <Upload className="w-4 h-4" />
+                Import
+              </button>
+            )}
+            {canCreate && (
+              <button onClick={openAdd}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition-colors">
+                <Plus className="w-4 h-4" />
+                Add Employee
+              </button>
+            )}
           </div>
         </div>
 
@@ -141,7 +164,7 @@ export default function Employees() {
             <select value={deptFilter} onChange={(e) => setDeptFilter(e.target.value)}
               className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700
                 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
-              {DEPARTMENTS.map((d) => <option key={d}>{d}</option>)}
+              {departments.map((d) => <option key={d}>{d}</option>)}
             </select>
           </div>
           <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
@@ -208,14 +231,14 @@ export default function Employees() {
                     </td>
 
                     <td className="px-4 py-3.5">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${EMP_TYPE_CLASS[emp.employment_type] ?? 'bg-gray-100 text-gray-600'}`}>
-                        {emp.employment_type || 'Full-time'}
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${EMP_TYPE[emp.employment_type]?.cls ?? 'bg-gray-100 text-gray-600'}`}>
+                        {EMP_TYPE[emp.employment_type]?.label ?? '—'}
                       </span>
                     </td>
 
                     <td className="px-4 py-3.5">
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${STATUS_CLASS[emp.status] ?? 'bg-gray-100 text-gray-600'}`}>
-                        {emp.status || 'active'}
+                        {emp.status}
                       </span>
                     </td>
 
@@ -233,14 +256,15 @@ export default function Employees() {
                                 className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
                                 View Profile
                               </button>
-                              <button onClick={() => openEdit(emp)}
-                                className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
-                                Edit
-                              </button>
-                              <button onClick={() => handleDeactivate(emp)}
-                                className={`w-full text-left px-4 py-2 text-sm transition-colors ${emp.status === 'active' ? 'text-red-600 hover:bg-red-50' : 'text-green-600 hover:bg-green-50'}`}>
-                                {emp.status === 'active' ? 'Deactivate' : 'Activate'}
-                              </button>
+                              {canUpdate && (
+                                <button onClick={() => openEdit(emp)}
+                                  className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+                                  Edit
+                                </button>
+                              )}
+                              {/* No Deactivate here. It sent a status the employee
+                                  endpoint refuses, so it could only ever fail;
+                                  taking away access is Settings → Users. */}
                             </div>
                           </>
                         )}
@@ -259,12 +283,18 @@ export default function Employees() {
         </div>
       </div>
 
-      <AddEmployeeModal
-        open={modalOpen}
-        onClose={() => { setModalOpen(false); setEditTarget(null) }}
-        initial={editTarget}
-        onSave={handleSave}
-      />
+      {/* Keyed, so each opening starts from the employee being edited. */}
+      {modalOpen && (
+        <AddEmployeeModal
+          key={editTarget?.id ?? 'new'}
+          open
+          onClose={() => { setModalOpen(false); setEditTarget(null) }}
+          initial={editTarget}
+          onSave={handleSave}
+        />
+      )}
+
+      {importOpen && <ImportEmployeesModal onClose={() => setImportOpen(false)} />}
 
       <EmployeeDrawer
         employee={drawerEmp}

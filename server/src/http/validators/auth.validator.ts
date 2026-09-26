@@ -41,3 +41,22 @@ export const changePasswordSchema = z.object({
 })
 
 export type ChangePasswordBody = z.infer<typeof changePasswordSchema>
+
+/**
+ * An invitation or reset link.
+ *
+ * The token is 32 random bytes in base64url — 43 characters. The bounds are a
+ * sanity check, not a format check; a wrong token is a dead link, answered the
+ * same way whatever shape it has.
+ */
+const linkToken = z.string().trim().min(20, 'That link is incomplete').max(200)
+
+export const inspectLinkSchema = z.object({ token: linkToken }).strict()
+
+export const redeemLinkSchema = z
+  .object({
+    token: linkToken,
+    // The policy itself is checked by the service, as for a password change.
+    password: z.string().min(1, 'Choose a password').max(200),
+  })
+  .strict()

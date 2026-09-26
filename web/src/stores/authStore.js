@@ -52,7 +52,7 @@ export const useAuthStore = create((set, get) => ({
       role: session?.role ?? null,
       permissions: session?.permissions ?? [],
       organization: session
-        ? { id: session.organizationId, name: session.organizationName }
+        ? { id: session.organizationId, name: session.organizationName, timezone: session.organizationTimezone }
         : null,
       loading: false,
     }),

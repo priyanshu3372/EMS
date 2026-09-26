@@ -130,3 +130,30 @@ export async function findUserByEmail(email: string): Promise<{ id: string } | n
     select: { id: true },
   })
 }
+
+/**
+ * Issues a fresh password link, killing any this person still holds.
+ *
+ * One live link per person. Two in circulation — the first "lost", the second
+ * sent to replace it — means the first still works when it turns up in
+ * somebody else's inbox.
+ */
+export async function replacePasswordLink(
+  db: ScopedDb,
+  input: {
+    userId: string
+    tokenHash: string
+    expiresAt: Date
+    purpose: 'invite' | 'reset'
+    createdByUserId: string
+  },
+): Promise<void> {
+  const now = new Date()
+  await db.$transaction([
+    db.passwordResetToken.updateMany({
+      where: { userId: input.userId, usedAt: null },
+      data: { usedAt: now },
+    }),
+    db.passwordResetToken.create({ data: input }),
+  ])
+}

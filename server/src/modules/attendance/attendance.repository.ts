@@ -294,3 +294,66 @@ export async function upsertDay(
 
   return findById(db, { scope: 'ORGANIZATION', employeeId: null }, row.id) as Promise<AttendanceRow>
 }
+
+/** Matches no employee. A uuid column can never hold this. */
+const NOBODY: Prisma.EmployeeWhereInput = { id: { equals: '00000000-0000-0000-0000-000000000000' } }
+
+/** The same data scope as `scopeWhere`, expressed on employees. */
+function employeeScopeWhere(scope: ScopeContext): Prisma.EmployeeWhereInput {
+  switch (scope.scope) {
+    case 'ORGANIZATION':
+      return {}
+
+    case 'DIRECT_REPORTS':
+      if (!scope.employeeId) return NOBODY
+      return { OR: [{ reportingManagerId: scope.employeeId }, { id: scope.employeeId }] }
+
+    case 'SELF':
+      if (!scope.employeeId) return NOBODY
+      return { id: scope.employeeId }
+
+    case 'DEPARTMENT':
+      throw new Error('DEPARTMENT scope is not implemented')
+  }
+}
+
+/**
+ * Everybody the caller may see who was employed on `day`, each with that
+ * day's row if there is one.
+ *
+ * The attendance page is a ROSTER, not a list of rows: the person nobody has
+ * marked yet is the one HR most needs to see. The old page built that roster in
+ * the browser from a second, unrelated employee list and matched the two on an
+ * id — which, once the employees came from one system and the attendance from
+ * another, matched nothing, and showed people who had punched in as unmarked.
+ *
+ * Built here instead, under ONE scope, so a manager's roster is their team and
+ * nobody else's, and a person who joined next week or left last month is not on
+ * it at all.
+ */
+export async function dayRoster(db: ScopedDb, scope: ScopeContext, day: CalendarDate) {
+  const date = toDateColumn(day)
+
+  return db.employee.findMany({
+    where: {
+      AND: [
+        employeeScopeWhere(scope),
+        { archivedAt: null },
+        { OR: [{ dateOfJoining: null }, { dateOfJoining: { lte: date } }] },
+        { OR: [{ lastWorkingDate: null }, { lastWorkingDate: { gte: date } }] },
+      ],
+    },
+    select: {
+      id: true,
+      employeeCode: true,
+      fullName: true,
+      attendanceMode: true,
+      department: { select: { name: true } },
+      designation: { select: { name: true } },
+      attendance: { where: { date }, take: 1 },
+    },
+    orderBy: { fullName: 'asc' },
+  })
+}
+
+export type RosterRow = Awaited<ReturnType<typeof dayRoster>>[number]

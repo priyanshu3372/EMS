@@ -86,3 +86,12 @@ export const refreshLimiter = createLimiter({
   limit: 120,
   keyGenerator: (req: Request) => ipKeyGenerator(req.ip ?? ''),
 })
+
+/**
+ * Password links. A token is 256 bits, so guessing one is not the threat —
+ * this keeps a script from hammering the endpoint regardless.
+ */
+export const passwordLinkLimiter = createLimiter({
+  limit: 20,
+  keyGenerator: (req: Request) => ipKeyGenerator(req.ip ?? ''),
+})

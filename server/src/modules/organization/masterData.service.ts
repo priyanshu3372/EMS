@@ -1,0 +1,122 @@
+import type { AppContext } from '../../platform/context'
+import { NotFound, Conflict } from '../../platform/errors/AppError'
+import { logger } from '../../platform/logger'
+import * as repo from './masterData.repository'
+
+/**
+ * Everything an employee form needs to offer as a choice, in one round trip.
+ *
+ * The forms used to carry their own lists — "Engineering", "Marketing",
+ * "Design" — typed into the page, naming departments this company does not
+ * have and missing the ones it does. And they sent the NAME, where the server
+ * stores an id, so a new hire's department was never saved at all.
+ */
+export async function masterData(ctx: AppContext) {
+  const [departments, designations, shifts] = await Promise.all([
+    repo.listDepartments(ctx.db),
+    repo.listDesignations(ctx.db),
+    repo.listShifts(ctx.db),
+  ])
+  return { departments, designations, shifts }
+}
+
+// ── Keeping the lists ───────────────────────────────────────────────────────
+//
+// The seeded lists were always meant as a first day, not a fixed taxonomy: a
+// company that does not use "Senior Manager" archives it, and one that has a
+// "Legal" department adds it. Until this existed, the only way to change any of
+// them was a database query.
+//
+// Nothing is ever deleted. Employees and attendance rows point at these, and a
+// department that vanished would leave last year's reports naming nobody.
+
+const LABEL: Record<repo.NamedKind, string> = { department: 'department', designation: 'designation' }
+
+export async function addNamed(ctx: AppContext, kind: repo.NamedKind, rawName: string) {
+  const name = rawName.trim()
+  const existing = await repo.findNamedByName(ctx.db, kind, name)
+
+  if (existing && !existing.archivedAt) {
+    throw Conflict(`A ${LABEL[kind]} called "${existing.name}" already exists`)
+  }
+
+  if (existing) {
+    // Brought back rather than duplicated. The old one still carries the
+    // history of everyone who was in it; a second row with the same name would
+    // split that history in two.
+    const restored = await repo.updateNamed(ctx.db, kind, existing.id, { archivedAt: null, name })
+    logger.info('Master data restored', { by: ctx.userId, kind, id: existing.id })
+    return { row: restored, restored: true }
+  }
+
+  const row = await repo.createNamed(ctx.db, kind, ctx.organizationId, name)
+  logger.info('Master data added', { by: ctx.userId, kind, id: row.id })
+  return { row, restored: false }
+}
+
+export async function renameNamed(ctx: AppContext, kind: repo.NamedKind, id: string, rawName: string) {
+  const name = rawName.trim()
+  const row = await repo.findNamedById(ctx.db, kind, id)
+  if (!row) throw NotFound(`That ${LABEL[kind]} does not exist`)
+
+  const clash = await repo.findNamedByName(ctx.db, kind, name)
+  if (clash && clash.id !== id) {
+    throw Conflict(
+      clash.archivedAt
+        ? `An archived ${LABEL[kind]} is called "${clash.name}". Add that name again to restore it instead.`
+        : `A ${LABEL[kind]} called "${clash.name}" already exists`,
+    )
+  }
+
+  return repo.updateNamed(ctx.db, kind, id, { name })
+}
+
+export async function archiveNamed(ctx: AppContext, kind: repo.NamedKind, id: string) {
+  const row = await repo.findNamedById(ctx.db, kind, id)
+  if (!row) throw NotFound(`That ${LABEL[kind]} does not exist`)
+  if (row.archivedAt) return row
+
+  // People already in it stay in it. Archiving only stops it being offered to
+  // the next hire.
+  const archived = await repo.updateNamed(ctx.db, kind, id, { archivedAt: new Date() })
+  logger.info('Master data archived', { by: ctx.userId, kind, id })
+  return archived
+}
+
+export async function addShift(ctx: AppContext, input: Required<repo.ShiftFields>) {
+  const existing = await repo.findShiftByName(ctx.db, input.name.trim())
+  if (existing && !existing.archivedAt) throw Conflict(`A shift called "${existing.name}" already exists`)
+
+  if (existing) {
+    const restored = await repo.updateShift(ctx.db, existing.id, { ...input, name: input.name.trim(), archivedAt: null })
+    return { row: restored, restored: true }
+  }
+
+  const row = await repo.createShift(ctx.db, ctx.organizationId, { ...input, name: input.name.trim() })
+  logger.info('Shift added', { by: ctx.userId, id: row.id })
+  return { row, restored: false }
+}
+
+/**
+ * Changing a shift's hours changes how FUTURE days are read. Days already
+ * recorded keep the expected hours they were measured against — the attendance
+ * row stores its own copy — so editing a shift never rewrites last month.
+ */
+export async function editShift(ctx: AppContext, id: string, input: repo.ShiftFields) {
+  const row = await repo.findShiftById(ctx.db, id)
+  if (!row) throw NotFound('That shift does not exist')
+
+  if (input.name !== undefined) {
+    const clash = await repo.findShiftByName(ctx.db, input.name.trim())
+    if (clash && clash.id !== id) throw Conflict(`A shift called "${clash.name}" already exists`)
+  }
+
+  return repo.updateShift(ctx.db, id, { ...input, ...(input.name !== undefined ? { name: input.name.trim() } : {}) })
+}
+
+export async function archiveShift(ctx: AppContext, id: string) {
+  const row = await repo.findShiftById(ctx.db, id)
+  if (!row) throw NotFound('That shift does not exist')
+  if (row.archivedAt) return row
+  return repo.updateShift(ctx.db, id, { archivedAt: new Date() })
+}
