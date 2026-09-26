@@ -4,6 +4,7 @@ import {
   getAttendance,
   getMonthlySummary,
   getDaySummary,
+  getDayRoster,
   postMark,
   patchAttendance,
   postImport,
@@ -34,6 +35,7 @@ attendanceRouter.get('/me/today', authorize('attendance:punch'), getMyToday)
 attendanceRouter.get('/', authorize('attendance:read'), getAttendance)
 attendanceRouter.get('/monthly-summary', authorize('attendance:read'), getMonthlySummary)
 attendanceRouter.get('/summary', authorize('attendance:read'), getDaySummary)
+attendanceRouter.get('/day', authorize('attendance:read'), getDayRoster)
 
 // Recording somebody else's day, and correcting one. Separate permissions
 // from reading: a manager may see their team's attendance and may not edit it.

@@ -28,6 +28,9 @@ export function serializeSessionUser(identity: AuthIdentity) {
     permissions: permissionsFor(identity.role),
     organizationId: identity.organizationId,
     organizationName: identity.organizationName,
+    // The company's zone, so the browser can tell which calendar day it is
+    // THERE. Taking the day from UTC shows yesterday until 05:30 in India.
+    organizationTimezone: identity.organizationTimezone,
     employee: identity.employee
       ? {
           id: identity.employee.id,

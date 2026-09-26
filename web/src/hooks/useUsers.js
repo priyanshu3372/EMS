@@ -85,6 +85,24 @@ export function useToggleUserStatus() {
 }
 
 /**
+ * A fresh link for somebody — their invitation again if they never set a
+ * password, or a password reset if they did. Any earlier link stops working.
+ *
+ * Returns the same `invite` shape as inviting does, so one panel shows both.
+ */
+export function useIssuePasswordLink() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({ user_id }) => {
+      const payload = await api.post(`/users/${user_id}/password-link`, {})
+      return payload.data
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: KEY }),
+  })
+}
+
+/**
  * Ends someone's access.
  *
  * Named delete because the button says Delete, but nothing is deleted. The

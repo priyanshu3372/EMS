@@ -18,6 +18,8 @@ export interface AuthIdentity {
   membershipId: string
   organizationId: string
   organizationName: string
+  /** IANA zone, e.g. Asia/Kolkata. Decides which calendar day "today" is. */
+  organizationTimezone: string
   role: Role
   status: AccountStatus
 
@@ -25,7 +27,7 @@ export interface AuthIdentity {
 }
 
 const membershipInclude = {
-  organization: { select: { id: true, name: true } },
+  organization: { select: { id: true, name: true, timezone: true } },
   employee: { select: { id: true, fullName: true, employeeCode: true, attendanceMode: true } },
 } as const
 
@@ -48,6 +50,7 @@ export async function findIdentityByEmail(email: string): Promise<AuthIdentity |
     membershipId: membership.id,
     organizationId: membership.organizationId,
     organizationName: membership.organization.name,
+    organizationTimezone: membership.organization.timezone,
     role: membership.role,
     status: membership.status,
     employee: membership.employee,
@@ -93,6 +96,7 @@ export async function findIdentityByEmployeeCode(code: string): Promise<AuthIden
     membershipId: membership.id,
     organizationId: membership.organizationId,
     organizationName: membership.organization.name,
+    organizationTimezone: membership.organization.timezone,
     role: membership.role,
     status: membership.status,
     employee: {
@@ -129,6 +133,7 @@ export async function findIdentityByUserId(userId: string): Promise<AuthIdentity
     membershipId: membership.id,
     organizationId: membership.organizationId,
     organizationName: membership.organization.name,
+    organizationTimezone: membership.organization.timezone,
     role: membership.role,
     status: membership.status,
     employee: membership.employee,

@@ -1,12 +1,18 @@
 import { useState, useEffect } from 'react'
 import { X, MapPin, Navigation, AlertTriangle, CheckCircle2, LocateFixed, Loader2, ShieldAlert, ShieldCheck } from 'lucide-react'
 
+/**
+ * What HR may record by hand. Late and WFH were here and are not statuses the
+ * server has — choosing either was a guaranteed refusal. WFH is a leave type,
+ * applied for like any other; lateness is read from the check-in time.
+ *
+ * On-leave is deliberately absent too: leave marked here would never touch the
+ * leave ledger, and the balance would stop matching the calendar.
+ */
 const STATUS_OPTIONS = [
   { value: 'present', label: 'Present', color: 'text-green-600' },
-  { value: 'absent', label: 'Absent', color: 'text-red-600' },
-  { value: 'late', label: 'Late', color: 'text-amber-600' },
-  { value: 'wfh', label: 'WFH', color: 'text-blue-600' },
   { value: 'half_day', label: 'Half Day', color: 'text-purple-600' },
+  { value: 'absent', label: 'Absent', color: 'text-red-600' },
 ]
 
 export default function MarkAttendanceModal({ open, onClose, employee, onSave }) {

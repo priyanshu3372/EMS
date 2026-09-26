@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import {
+import { postPasswordLink,
   getUsers,
   postInvite,
   putRole,
@@ -29,6 +29,7 @@ userRouter.use(authenticate)
 
 userRouter.get('/', authorize('user:invite'), getUsers)
 userRouter.post('/invite', authorize('user:invite'), postInvite)
+userRouter.post('/:id/password-link', authorize('user:invite'), postPasswordLink)
 userRouter.put('/:id/role', authorize('membership:role:assign'), putRole)
 userRouter.patch('/:id/status', authorize('user:status:update'), patchStatus)
 userRouter.delete('/:id', authorize('user:delete'), deleteUser)

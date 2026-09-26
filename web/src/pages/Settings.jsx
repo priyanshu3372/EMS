@@ -3,12 +3,14 @@ import {
   Building2, Users, CalendarDays, Wallet, Bell,
   Save, Plus, Trash2, Edit2, X, Check,
   Mail, Shield, ToggleLeft, ToggleRight, ChevronRight,
-  Globe, Clock, IndianRupee, Loader2, AlertCircle, MapPin, Compass, Navigation, LocateFixed, ShieldCheck
+  Globe, Clock, IndianRupee, Loader2, AlertCircle, MapPin, Compass, Navigation, LocateFixed, ShieldCheck,
+  KeyRound, UserPlus,
 } from 'lucide-react'
 import {
   useUsers, useUpdateUserRole,
-  useToggleUserStatus, useDeleteUser,
+  useToggleUserStatus, useDeleteUser, useIssuePasswordLink,
 } from '../hooks/useUsers'
+import { InviteUserForm, PasswordLinkPanel } from '../features/settings/UserAccess'
 import WeeklyOffPicker from '../features/settings/WeeklyOffPicker'
 import { useAuthStore } from '../stores/authStore'
 import {
@@ -380,6 +382,24 @@ function UsersSettings() {
   const updateRole = useUpdateUserRole()
   const toggleStatus = useToggleUserStatus()
   const deleteUser = useDeleteUser()
+  const issueLink = useIssuePasswordLink()
+
+  // The invite form, and the one link most recently issued. A link is shown
+  // once — the server keeps only its hash — so it stays on screen until the
+  // administrator closes it.
+  const [showInvite, setShowInvite] = useState(false)
+  const [issued, setIssued] = useState(null)
+
+  async function handleIssueLink(user) {
+    // A reset link lets whoever holds it take over that account, so it is
+    // worth one deliberate click. A repeat invitation carries no such risk.
+    if (user.status === 'active' && !window.confirm(
+      `Create a password reset link for ${user.email}? Whoever holds it can set a new password for this account, and their other sessions end when it is used.`,
+    )) return
+
+    const result = await issueLink.mutateAsync({ user_id: user.id }).catch(() => null)
+    if (result) setIssued({ email: result.user.email, invite: result.invite })
+  }
 
   function startEdit(user) { setEditId(user.id); setEditRole(user.role) }
 
@@ -417,6 +437,26 @@ function UsersSettings() {
         title="Manage Users"
         desc={isLoading ? 'Loading…' : `${users.length} user${users.length !== 1 ? 's' : ''} in your organisation.`}
       >
+        <div className="space-y-4 mb-4">
+          {issued && (
+            <PasswordLinkPanel email={issued.email} invite={issued.invite} onDone={() => setIssued(null)} />
+          )}
+
+          {showInvite ? (
+            <InviteUserForm
+              onCancel={() => setShowInvite(false)}
+              onInvited={(result) => { setShowInvite(false); setIssued(result) }}
+            />
+          ) : (
+            <button
+              onClick={() => setShowInvite(true)}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold"
+            >
+              <UserPlus className="w-4 h-4" /> Invite user
+            </button>
+          )}
+        </div>
+
         {isLoading ? (
           <div className="flex items-center justify-center py-12 text-gray-400">
             <Loader2 className="w-6 h-6 animate-spin mr-2" /> Loading users…
@@ -445,6 +485,9 @@ function UsersSettings() {
                         </div>
                         <div>
                           <p className="text-sm font-medium text-gray-900">{user.full_name || '—'}</p>
+                          {/* The address the link belongs to — for an invited
+                              person, often the only thing anybody knows yet. */}
+                          <p className="text-xs text-gray-500">{user.email}</p>
                         </div>
                       </div>
                     </td>
@@ -496,6 +539,16 @@ function UsersSettings() {
                         >
                           <Edit2 className="w-3.5 h-3.5" />
                         </button>
+                        {user.status !== 'inactive' && (
+                          <button
+                            onClick={() => handleIssueLink(user)}
+                            disabled={issueLink.isPending}
+                            className="p-1.5 rounded-lg hover:bg-blue-50 text-gray-400 hover:text-blue-600 transition-colors"
+                            title={user.status === 'invited' ? 'New invitation link' : 'Password reset link'}
+                          >
+                            <KeyRound className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                         {user.status !== 'invited' && (
                           <button
                             onClick={() => handleToggleStatus(user)}

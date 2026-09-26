@@ -1,5 +1,5 @@
 import type { RequestHandler } from 'express'
-import {
+import { issuePasswordLink,
   listUsers,
   inviteUser,
   changeRole,
@@ -116,4 +116,30 @@ export const deleteUser: RequestHandler = async (req, res) => {
   await terminateUser(ctx, id)
 
   res.status(204).end()
+}
+
+/**
+ * POST /api/users/:id/password-link
+ *
+ * A fresh link — the invitation again if they never set a password, a reset if
+ * they did. Any earlier link for that person stops working.
+ */
+export const postPasswordLink: RequestHandler = async (req, res) => {
+  const ctx = appContext(res)
+  const { id } = parseBody(membershipIdSchema, req.params)
+
+  const link = await issuePasswordLink(ctx, id)
+
+  res.status(201).json({
+    data: {
+      user: serializeMembership(link.membership),
+      invite: {
+        token: link.token,
+        expires_at: link.expiresAt.toISOString(),
+        purpose: link.purpose,
+        delivery: 'manual',
+      },
+    },
+    meta: { requestId: res.locals.requestId },
+  })
 }

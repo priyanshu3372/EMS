@@ -1,13 +1,17 @@
 import { useState } from 'react'
-import { Navigate } from 'react-router-dom'
-import { Eye, EyeOff, Lock, Mail, AlertCircle } from 'lucide-react'
+import { Navigate, useLocation } from 'react-router-dom'
+import { Eye, EyeOff, Lock, Mail, AlertCircle, CheckCircle2 } from 'lucide-react'
 import { login } from '../api/auth'
 import { useAuthStore } from '../stores/authStore'
 
 export default function SignIn() {
   const { user, loading, setSession } = useAuthStore()
 
-  const [email, setEmail] = useState('')
+  // Set by the set-password page, so the person lands here with their address
+  // filled in and told what just happened.
+  const passwordSetFor = useLocation().state?.passwordSetFor ?? ''
+
+  const [email, setEmail] = useState(passwordSetFor)
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -38,11 +42,10 @@ export default function SignIn() {
   }
 
   function handleForgotPassword() {
-    // Self-service reset arrives with the invite flow on Day 8. Saying so is
-    // better than a button that looks like it worked and sent nothing.
-    setError(
-      'Password reset is not available yet. Ask your administrator to set a new password for you.',
-    )
+    // There is no email in v1, so there is nothing to send. What does exist is
+    // a reset link an administrator can issue from Settings → Users — so say
+    // that, rather than show a button that looks like it sent something.
+    setError('Ask your administrator for a password reset link. They can create one from Settings → Users.')
   }
 
   return (
@@ -100,6 +103,13 @@ export default function SignIn() {
             </div>
 
             <form onSubmit={handleSignIn} className="space-y-5">
+
+              {passwordSetFor && !error && (
+                <div className="flex items-start gap-3 p-3 rounded-lg bg-green-50 border border-green-200">
+                  <CheckCircle2 className="w-4 h-4 text-green-600 mt-0.5 shrink-0" />
+                  <p className="text-sm text-green-700">Password saved. Sign in with it now.</p>
+                </div>
+              )}
 
               {/* Error */}
               {error && (

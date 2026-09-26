@@ -6,6 +6,7 @@ import {
 import ApplyLeaveModal from '../features/leave/ApplyLeaveModal'
 import { useLeaveRequests, useLeaveBalances, useHolidays, useApplyLeave, useUpdateLeaveStatus } from '../hooks/useLeave'
 import { useAuthStore } from '../stores/authStore'
+import { calendarDayIn } from '../lib/dates'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -314,7 +315,8 @@ function BalanceTab() {
 
 function HolidaysTab() {
   const { data: holidays = [] } = useHolidays()
-  const today = new Date().toISOString().split('T')[0]
+  const timezone = useAuthStore((state) => state.organization?.timezone)
+  const today = calendarDayIn(timezone)
   const upcoming = holidays.filter((h) => h.date >= today)
   const past = holidays.filter((h) => h.date < today)
 
@@ -399,8 +401,10 @@ function HolidaysTab() {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function Leave() {
-  const { user, role } = useAuthStore()
-  const isManagement = ['super_admin', 'admin', 'hr', 'manager', 'rm'].includes(role)
+  // Who sees Approve and Reject is a PERMISSION, not a list of role names. The
+  // list this replaced included admin, whom the client's matrix bars from leave
+  // decisions — so admin got buttons that could only ever return 403.
+  const isManagement = useAuthStore((state) => state.can('leave:approve'))
   // Same: scoping moved to the server. HR sees the company, a manager their
   // direct reports, an employee their own.
   const { data: requests = [], isLoading } = useLeaveRequests()
@@ -409,17 +413,25 @@ export default function Leave() {
   const [tab, setTab] = useState('requests')
   const [applyOpen, setApplyOpen] = useState(false)
 
-  function handleApprove(id, employeeId, leaveType, days) {
-    updateLeaveStatus.mutate({ id, status: 'approved', reviewed_by: user?.id, employee_id: employeeId, leave_type: leaveType, days })
+  // Only the id and the decision. Who decided is whoever is signed in, which
+  // the server knows; the old version sent a reviewer id from the browser, and
+  // the client does not get to say who approved something.
+  function handleApprove(id) {
+    updateLeaveStatus.mutate({ id, status: 'approved' })
   }
 
-  function handleReject(id, employeeId, leaveType, days) {
-    updateLeaveStatus.mutate({ id, status: 'rejected', reviewed_by: user?.id, employee_id: employeeId, leave_type: leaveType, days })
+  function handleReject(id) {
+    updateLeaveStatus.mutate({ id, status: 'rejected' })
   }
 
+  // Returned, not fired and forgotten: the modal stays open until the server
+  // has accepted the request, so a refusal does not throw away what was typed.
+  //
+  // No employee id. This used to send the signed-in USER's id as the employee
+  // id — a different table's key — which the server read as applying on
+  // somebody else's behalf and refused, for every employee who tried.
   function handleApply(data) {
-    applyLeave.mutate({ ...data, employee_id: user?.id, applied_on: new Date().toISOString().split('T')[0] })
-    setApplyOpen(false)
+    return applyLeave.mutateAsync(data)
   }
 
   const pendingCount = requests.filter((r) => r.status === 'pending').length

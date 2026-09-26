@@ -56,3 +56,22 @@ export async function changePassword(currentPassword, newPassword) {
   setAccessToken(payload.data.accessToken)
   return payload.data.user
 }
+
+/**
+ * What an invitation or reset link is for — whose account, and whether it is
+ * still alive — asked before the person types a password into it.
+ */
+export async function inspectPasswordLink(token) {
+  const payload = await request('POST', '/auth/password-link/inspect', { token })
+  return payload.data
+}
+
+/**
+ * Sets the password and spends the link. Does not sign in: the sign-in page
+ * that follows is where the person first finds out whether they typed the
+ * password they meant to.
+ */
+export async function redeemPasswordLink(token, password) {
+  const payload = await request('POST', '/auth/password-link/redeem', { token, password })
+  return payload.data
+}

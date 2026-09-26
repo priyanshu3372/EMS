@@ -1,54 +1,57 @@
 import { createElement, useState, useMemo } from 'react'
 import {
-  UserCheck, UserX, Clock, Monitor, Search,
+  UserCheck, UserX, Clock, CalendarDays, CircleDashed, Search,
   ChevronLeft, ChevronRight, Download, Edit2, Calendar,
 } from 'lucide-react'
 import MarkAttendanceModal from '../features/attendance/MarkAttendanceModal'
-import { useEmployees } from '../hooks/useEmployees'
-import { useAttendance, useMonthAttendance, useMarkAttendance } from '../hooks/useAttendance'
+import { useDayRoster, useMonthAttendance, useMarkAttendance } from '../hooks/useAttendance'
 import { useAuthStore } from '../stores/authStore'
+import { calendarDayIn, addDays, wallClockIn, formatCalendarDay } from '../lib/dates'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+/**
+ * The statuses the server has — no more, no fewer. The old list had `late` and
+ * `wfh`, which do not exist (WFH is a leave type, applied for like any other),
+ * and lacked `on_leave` and `holiday`, which do — so leave days rendered as
+ * blank and a Late card counted nothing, for ever.
+ */
 const STATUS_META = {
   present:    { label: 'Present',    cls: 'bg-green-100 text-green-700',    dot: 'bg-green-500' },
-  absent:     { label: 'Absent',     cls: 'bg-red-100 text-red-600',        dot: 'bg-red-500' },
-  late:       { label: 'Late',       cls: 'bg-amber-100 text-amber-700',    dot: 'bg-amber-500' },
-  wfh:        { label: 'WFH',        cls: 'bg-blue-100 text-blue-700',      dot: 'bg-blue-500' },
   half_day:   { label: 'Half Day',   cls: 'bg-purple-100 text-purple-700',  dot: 'bg-purple-500' },
+  absent:     { label: 'Absent',     cls: 'bg-red-100 text-red-600',        dot: 'bg-red-500' },
+  on_leave:   { label: 'On Leave',   cls: 'bg-amber-100 text-amber-700',    dot: 'bg-amber-500' },
+  holiday:    { label: 'Holiday',    cls: 'bg-sky-100 text-sky-700',        dot: 'bg-sky-500' },
   weekly_off: { label: 'Weekly Off', cls: 'bg-indigo-100 text-indigo-700',  dot: 'bg-indigo-500' },
 }
 
-const STATUS_TABS  = ['all', 'present', 'absent', 'late', 'wfh', 'half_day', 'weekly_off']
-const TAB_LABELS   = { all: 'All', present: 'Present', absent: 'Absent', late: 'Late', wfh: 'WFH', half_day: 'Half Day', weekly_off: 'Weekly Off' }
-const DEPARTMENTS  = ['All', 'Engineering', 'Sales', 'HR', 'Finance', 'Operations', 'Marketing', 'Design']
-
-function hoursWorked(ci, co) {
-  if (!ci || !co) return '—'
-  const [ch, cm] = ci.split(':').map(Number)
-  const [oh, om] = co.split(':').map(Number)
-  const mins = (oh * 60 + om) - (ch * 60 + cm)
-  if (mins <= 0) return '—'
-  return `${Math.floor(mins / 60)}h ${mins % 60}m`
+/** `unmarked` is not a status — it is the absence of one, and a tab of its own. */
+const STATUS_TABS = ['all', 'present', 'half_day', 'absent', 'on_leave', 'weekly_off', 'unmarked']
+const TAB_LABELS  = {
+  all: 'All', present: 'Present', half_day: 'Half Day', absent: 'Absent',
+  on_leave: 'On Leave', weekly_off: 'Weekly Off', unmarked: 'Not Marked',
 }
 
-function formatDisplayDate(dateStr) {
-  return new Date(dateStr).toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
-}
-
-function offsetDate(dateStr, days) {
-  const d = new Date(dateStr)
-  d.setDate(d.getDate() + days)
-  return d.toISOString().slice(0, 10)
+/** The stored figure, from the server — never recomputed here from two clock times. */
+function formatHours(hours) {
+  if (hours == null) return '—'
+  const whole = Math.floor(hours)
+  const minutes = Math.round((hours - whole) * 60)
+  return `${whole}h ${minutes}m`
 }
 
 function initials(name) {
   return (name || '').split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()
 }
 
+/** A CSV cell. Quotes inside a value are doubled, or one note breaks every column after it. */
+function cell(value) {
+  return `"${String(value ?? '').replace(/"/g, '""')}"`
+}
+
 // ─── Monthly calendar ─────────────────────────────────────────────────────────
 
-function MonthlyCalendar({ attendanceMap, year, month }) {
+function MonthlyCalendar({ attendanceMap, year, month, today }) {
   const daysInMonth = new Date(year, month, 0).getDate()
   const firstDay    = new Date(year, month - 1, 1).getDay()
   const monthLabel  = new Date(year, month - 1, 1).toLocaleString('en-IN', { month: 'long', year: 'numeric' })
@@ -78,7 +81,7 @@ function MonthlyCalendar({ attendanceMap, year, month }) {
           const key = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
           const status = attendanceMap[key]
           const meta = STATUS_META[status]
-          const isToday = key === new Date().toISOString().slice(0, 10)
+          const isToday = key === today
           return (
             <div key={key}
               className={`aspect-square flex items-center justify-center rounded-lg text-xs font-semibold transition-all duration-100
@@ -96,95 +99,115 @@ function MonthlyCalendar({ attendanceMap, year, month }) {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function Attendance() {
-  const { role, user } = useAuthStore()
-  const today = new Date().toISOString().slice(0, 10)
-  
-  // Default to daily for management, monthly for employee
-  const [view, setView]             = useState(role === 'employee' ? 'monthly' : 'daily')
+  const timezone = useAuthStore((state) => state.organization?.timezone)
+  // The caller's EMPLOYEE id — attendance rows belong to employees. The old
+  // page compared them with the USER id, a different table's key, so the
+  // "My Attendance" calendar never matched a single row.
+  const myEmployeeId = useAuthStore((state) => state.profile?.id ?? null)
+  // Who may mark or correct a day is a permission. The role list this replaced
+  // decided it by name.
+  const canMark = useAuthStore((state) => state.can('attendance:mark'))
+
+  // The company's today. From UTC it was yesterday until 05:30 in India.
+  const today = calendarDayIn(timezone)
+
+  const [viewChoice, setViewChoice] = useState(null)
   const [date, setDate]             = useState(today)
   const [tab, setTab]               = useState('all')
   const [deptFilter, setDeptFilter] = useState('All')
   const [search, setSearch]         = useState('')
   const [modalEmp, setModalEmp]     = useState(null)
 
-  const { data: employees = [] }            = useEmployees()
-  const { data: attRecords = [], isLoading } = useAttendance(date)
-  const markAttendance                       = useMarkAttendance()
+  const { data: roster, isLoading } = useDayRoster(date)
+  const markAttendance              = useMarkAttendance()
 
-  // For monthly calendar
+  // For the personal monthly calendar
   const [calYear, calMonth] = date.split('-').map(Number)
   const { data: monthRecords = [] } = useMonthAttendance(calYear, calMonth)
 
-  const canAmend = ['super_admin', 'hr'].includes(role)
+  const records = useMemo(() => (roster?.employees ?? []).map((emp) => ({
+    id: emp.employee_id,
+    employee_code: emp.employee_code,
+    full_name: emp.full_name,
+    department: emp.department,
+    designation: emp.designation,
+    status: emp.attendance?.status ?? null,
+    // Shown, and handed to the edit form, as the company's wall clock.
+    check_in: wallClockIn(timezone, emp.attendance?.check_in),
+    check_out: wallClockIn(timezone, emp.attendance?.check_out),
+    hours_worked: emp.attendance?.hours_worked ?? null,
+    note: emp.attendance?.note ?? '',
+  })), [roster, timezone])
 
-  // Merge employees with their attendance for the selected date
-  const records = useMemo(() => {
-    return employees.map((emp) => {
-      const att = attRecords.find((a) => a.employee_id === emp.id)
-      return {
-        id: emp.id,
-        employee_id: emp.employee_id || '—',
-        full_name: emp.full_name,
-        department: emp.department || '—',
-        designation: emp.designation || '—',
-        status: att?.status || null,
-        check_in: att?.check_in || '',
-        check_out: att?.check_out || '',
-        note: att?.note || '',
-      }
-    })
-  }, [employees, attRecords])
+  // Whether this person sees anybody but themselves decides the default view:
+  // somebody with a team starts on the roster, somebody without starts on their
+  // own calendar. Decided by what the server returned — the scope it applied —
+  // rather than by guessing from a role name.
+  const seesOthers = records.some((r) => r.id !== myEmployeeId)
+  // Until the roster arrives nobody knows which view is right, and guessing
+  // flashes the wrong one at HR on every page load.
+  const ready = Boolean(roster)
+  const view = viewChoice ?? (seesOthers ? 'daily' : 'monthly')
 
-  const stats = useMemo(() => ({
-    present:    records.filter((r) => r.status === 'present').length,
-    absent:     records.filter((r) => r.status === 'absent').length,
-    late:       records.filter((r) => r.status === 'late').length,
-    wfh:        records.filter((r) => r.status === 'wfh').length,
-    half_day:   records.filter((r) => r.status === 'half_day').length,
-    weekly_off: records.filter((r) => r.status === 'weekly_off').length,
-    total:      records.length,
-  }), [records])
+  const departments = useMemo(
+    () => ['All', ...[...new Set(records.map((r) => r.department).filter(Boolean))].sort()],
+    [records],
+  )
+
+  const stats = useMemo(() => {
+    const count = (status) => records.filter((r) => r.status === status).length
+    return {
+      present: count('present'),
+      half_day: count('half_day'),
+      absent: count('absent'),
+      on_leave: count('on_leave'),
+      weekly_off: count('weekly_off'),
+      unmarked: records.filter((r) => r.status === null).length,
+    }
+  }, [records])
 
   const filtered = useMemo(() => records.filter((r) => {
-    if (tab !== 'all' && r.status !== tab) return false
+    if (tab === 'unmarked' ? r.status !== null : tab !== 'all' && r.status !== tab) return false
     if (deptFilter !== 'All' && r.department !== deptFilter) return false
     if (search.trim()) {
       const q = search.toLowerCase()
-      if (!r.full_name.toLowerCase().includes(q) && !r.employee_id.toLowerCase().includes(q)) return false
+      if (!r.full_name.toLowerCase().includes(q) && !(r.employee_code ?? '').toLowerCase().includes(q)) return false
     }
     return true
   }), [records, tab, deptFilter, search])
 
-  function handleSave(updated) {
-    markAttendance.mutate({
-      employee_id: updated.id,
+  async function handleSave(updated) {
+    // An absence has no clock times; the form may still be holding the
+    // default check-in it filled in before the status was changed.
+    const timed = updated.status !== 'absent'
+
+    // Closed only once saved, so a refusal does not lose what was entered.
+    const saved = await markAttendance.mutateAsync({
+      employee_uuid: updated.id,
       date,
       status: updated.status,
-      check_in: updated.check_in || null,
-      check_out: updated.check_out || null,
-      note: updated.note || '',
-      check_in_lat: updated.check_in_lat,
-      check_in_lon: updated.check_in_lon,
-      distance_km: updated.distance_km,
-      geofence_verified: updated.geofence_verified,
-    })
-    setModalEmp(null)
+      check_in: timed ? updated.check_in || null : null,
+      check_out: timed ? updated.check_out || null : null,
+      note: updated.note || null,
+    }).then(() => true, () => false)
+
+    if (saved) setModalEmp(null)
   }
 
   function handleExportCSV() {
-    const headers = ['Employee Name', 'Employee ID', 'Department', 'Designation', 'Status', 'Check In', 'Check Out', 'Hours Worked', 'Note']
+    const headers = ['Employee Name', 'Employee Code', 'Department', 'Designation', 'Status', 'Check In', 'Check Out', 'Hours Worked', 'Note']
     const rows = filtered.map((r) => [
-      r.full_name || '',
-      r.employee_id || '',
-      r.department || '',
-      r.designation || '',
-      r.status || 'Not Marked',
-      r.check_in || '',
-      r.check_out || '',
-      hoursWorked(r.check_in, r.check_out),
-      r.note || '',
+      r.full_name,
+      r.employee_code,
+      r.department,
+      r.designation,
+      r.status ? STATUS_META[r.status]?.label ?? r.status : 'Not Marked',
+      r.check_in,
+      r.check_out,
+      r.hours_worked ?? '',
+      r.note,
     ])
-    const lines = [headers.join(','), ...rows.map((row) => row.map((v) => `"${v}"`).join(','))]
+    const lines = [headers.map(cell).join(','), ...rows.map((row) => row.map(cell).join(','))]
     const blob = new Blob([lines.join('\n')], { type: 'text/csv' })
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob)
@@ -192,19 +215,19 @@ export default function Attendance() {
     a.click()
   }
 
-  const marked  = records.filter((r) => r.status).length
-  const attPct  = records.length ? Math.round((stats.present + stats.wfh + stats.half_day) / records.length * 100) : 0
+  const marked = records.length - stats.unmarked
+  const attPct = records.length ? Math.round((stats.present + stats.half_day) / records.length * 100) : 0
 
-  // Build a date→status map for the logged in user
+  // Build a date→status map for the signed-in employee's own days
   const attendanceMap = useMemo(() => {
     const map = {}
     monthRecords.forEach((a) => {
-      if (a.employee_id === user?.id) {
+      if (a.employee_id === myEmployeeId) {
         map[a.date] = a.status
       }
     })
     return map
-  }, [monthRecords, user?.id])
+  }, [monthRecords, myEmployeeId])
 
   return (
     <>
@@ -214,26 +237,17 @@ export default function Attendance() {
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>
             <h2 className="text-2xl font-bold text-gray-900">Attendance</h2>
-            <p className="text-sm text-gray-500 mt-0.5">{formatDisplayDate(date)}</p>
+            <p className="text-sm text-gray-500 mt-0.5">{formatCalendarDay(date)}</p>
           </div>
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => {
-                const empToMark = records.find(r => r.id === user?.id) || employees[0] || { id: user?.id || 'emp_1', full_name: user?.full_name || 'Employee', department: 'Operations' }
-                setModalEmp(empToMark)
-              }}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold transition-colors shadow-xs"
-            >
-              <UserCheck className="w-4 h-4" /> Mark Today&apos;s Attendance
-            </button>
-            {role !== 'employee' && (
+            {seesOthers && (
               <div className="flex items-center bg-gray-100 rounded-lg p-1">
-                <button onClick={() => setView('daily')}
+                <button onClick={() => setViewChoice('daily')}
                   className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors
                     ${view === 'daily' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
                   Daily
                 </button>
-                <button onClick={() => setView('monthly')}
+                <button onClick={() => setViewChoice('monthly')}
                   className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-1.5
                     ${view === 'monthly' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
                   <Calendar className="w-3.5 h-3.5" /> Monthly
@@ -246,10 +260,14 @@ export default function Attendance() {
           </div>
         </div>
 
-        {/* Attendance view filters for Employee */}
-        {role === 'employee' && (
+        {!ready && (
+          <p className="text-sm text-gray-400 py-10 text-center">Loading attendance…</p>
+        )}
+
+        {/* Month navigation for somebody who sees only their own days */}
+        {ready && !seesOthers && (
           <div className="flex items-center gap-2 border border-gray-200 rounded-lg overflow-hidden shrink-0 w-fit bg-white">
-            <button onClick={() => setDate((d) => offsetDate(d, -30))}
+            <button onClick={() => setDate((d) => addDays(`${d.slice(0, 7)}-01`, -1).slice(0, 7) + '-01')}
               className="px-2.5 py-2 hover:bg-gray-50 text-slate-500 hover:text-slate-700 transition-colors border-r border-gray-200">
               <ChevronLeft className="w-4 h-4" />
             </button>
@@ -259,23 +277,22 @@ export default function Attendance() {
               onChange={(e) => setDate(e.target.value + '-01')}
               className="px-3 py-2 text-sm text-slate-700 focus:outline-none bg-transparent"
             />
-            <button onClick={() => setDate((d) => offsetDate(d, 30))}
+            <button onClick={() => setDate((d) => addDays(`${d.slice(0, 7)}-28`, 7).slice(0, 7) + '-01')}
               className="px-2.5 py-2 hover:bg-gray-50 text-slate-500 hover:text-slate-700 transition-colors border-l border-gray-200">
               <ChevronRight className="w-4 h-4" />
             </button>
           </div>
         )}
 
-        {/* Stat cards for Admin/HR/Managers */}
-        {role !== 'employee' && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+        {/* Stat cards for anybody looking at a team */}
+        {seesOthers && (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
             {[
-              { key: 'present',    icon: UserCheck, label: 'Present',    iconBg: 'bg-green-100',    iconColor: 'text-green-600' },
-              { key: 'absent',     icon: UserX,     label: 'Absent',     iconBg: 'bg-red-100',      iconColor: 'text-red-600' },
-              { key: 'late',       icon: Clock,     label: 'Late',       iconBg: 'bg-amber-100',    iconColor: 'text-amber-600' },
-              { key: 'wfh',        icon: Monitor,   label: 'WFH',        iconBg: 'bg-blue-100',     iconColor: 'text-blue-600' },
-              { key: 'half_day',   icon: Clock,     label: 'Half Day',   iconBg: 'bg-purple-100',   iconColor: 'text-purple-600' },
-              { key: 'weekly_off', icon: Clock,     label: 'Weekly Off', iconBg: 'bg-indigo-100',   iconColor: 'text-indigo-600' },
+              { key: 'present',  icon: UserCheck,    label: 'Present',    iconBg: 'bg-green-100',  iconColor: 'text-green-600' },
+              { key: 'half_day', icon: Clock,        label: 'Half Day',   iconBg: 'bg-purple-100', iconColor: 'text-purple-600' },
+              { key: 'absent',   icon: UserX,        label: 'Absent',     iconBg: 'bg-red-100',    iconColor: 'text-red-600' },
+              { key: 'on_leave', icon: CalendarDays, label: 'On Leave',   iconBg: 'bg-amber-100',  iconColor: 'text-amber-600' },
+              { key: 'unmarked', icon: CircleDashed, label: 'Not Marked', iconBg: 'bg-gray-100',   iconColor: 'text-gray-500' },
             ].map(({ key, icon, label, iconBg, iconColor }) => (
               <button key={key} onClick={() => setTab(tab === key ? 'all' : key)}
                 className={`bg-white rounded-xl border shadow-sm p-4 flex items-center gap-3 text-left transition-all
@@ -292,27 +309,29 @@ export default function Attendance() {
           </div>
         )}
 
-        {view === 'monthly' && (
+        {ready && view === 'monthly' && (
           <MonthlyCalendar
             attendanceMap={attendanceMap}
             year={calYear}
             month={calMonth}
+            today={today}
           />
         )}
 
-        {view === 'daily' && role !== 'employee' && (
+        {view === 'daily' && seesOthers && (
           <>
             {/* Date nav + filters */}
             <div className="bg-white rounded-xl border border-gray-200 shadow-sm px-4 py-3 flex flex-wrap gap-3 items-center">
               <div className="flex items-center gap-1 border border-gray-200 rounded-lg overflow-hidden shrink-0">
-                <button onClick={() => setDate((d) => offsetDate(d, -1))}
+                <button onClick={() => setDate((d) => addDays(d, -1))}
                   className="px-2.5 py-2 hover:bg-gray-50 text-gray-500 hover:text-gray-700 transition-colors border-r border-gray-200">
                   <ChevronLeft className="w-4 h-4" />
                 </button>
-                <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
+                <input type="date" value={date} max={today} onChange={(e) => e.target.value && setDate(e.target.value)}
                   className="px-3 py-2 text-sm text-gray-700 focus:outline-none bg-transparent" />
-                <button onClick={() => setDate((d) => offsetDate(d, 1))}
-                  className="px-2.5 py-2 hover:bg-gray-50 text-gray-500 hover:text-gray-700 transition-colors border-l border-gray-200">
+                <button onClick={() => setDate((d) => (d < today ? addDays(d, 1) : d))}
+                  disabled={date >= today}
+                  className="px-2.5 py-2 hover:bg-gray-50 text-gray-500 hover:text-gray-700 disabled:text-gray-300 disabled:hover:bg-transparent transition-colors border-l border-gray-200">
                   <ChevronRight className="w-4 h-4" />
                 </button>
               </div>
@@ -325,10 +344,13 @@ export default function Attendance() {
                     focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder:text-gray-400" />
               </div>
 
+              {/* The company's own departments, from the people on the roster —
+                  not a list typed into this file that named departments the
+                  company does not have. */}
               <select value={deptFilter} onChange={(e) => setDeptFilter(e.target.value)}
                 className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700
                   focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
-                {DEPARTMENTS.map((d) => <option key={d}>{d}</option>)}
+                {departments.map((d) => <option key={d}>{d}</option>)}
               </select>
 
               <div className="ml-auto flex items-center gap-2 shrink-0">
@@ -368,14 +390,14 @@ export default function Attendance() {
                       <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Check-out</th>
                       <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Hours</th>
                       <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
-                      {canAmend && <th className="px-5 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Action</th>}
+                      {canMark && <th className="px-5 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Action</th>}
                     </tr>
                   </thead>
                   <tbody>
                     {isLoading ? (
-                      <tr><td colSpan={canAmend ? 7 : 6} className="text-center py-16 text-sm text-gray-400">Loading…</td></tr>
+                      <tr><td colSpan={canMark ? 7 : 6} className="text-center py-16 text-sm text-gray-400">Loading…</td></tr>
                     ) : filtered.length === 0 ? (
-                      <tr><td colSpan={canAmend ? 7 : 6} className="text-center py-16 text-sm text-gray-400">No records found.</td></tr>
+                      <tr><td colSpan={canMark ? 7 : 6} className="text-center py-16 text-sm text-gray-400">No records found.</td></tr>
                     ) : filtered.map((rec) => {
                       const meta = rec.status ? STATUS_META[rec.status] : null
                       return (
@@ -387,16 +409,16 @@ export default function Attendance() {
                               </div>
                               <div>
                                 <p className="text-sm font-medium text-gray-900">{rec.full_name}</p>
-                                <p className="text-xs text-gray-400 font-mono">{rec.employee_id}</p>
+                                <p className="text-xs text-gray-400 font-mono">{rec.employee_code}</p>
                               </div>
                             </div>
                           </td>
                           <td className="px-4 py-3.5">
-                            <p className="text-sm text-gray-700">{rec.department}</p>
-                            <p className="text-xs text-gray-400">{rec.designation}</p>
+                            <p className="text-sm text-gray-700">{rec.department || '—'}</p>
+                            <p className="text-xs text-gray-400">{rec.designation || '—'}</p>
                           </td>
                           <td className="px-4 py-3.5">
-                            <span className={`text-sm font-medium ${rec.check_in ? (rec.status === 'late' ? 'text-amber-600' : 'text-gray-900') : 'text-gray-300'}`}>
+                            <span className={`text-sm font-medium ${rec.check_in ? 'text-gray-900' : 'text-gray-300'}`}>
                               {rec.check_in || '—'}
                             </span>
                           </td>
@@ -406,7 +428,7 @@ export default function Attendance() {
                             </span>
                           </td>
                           <td className="px-4 py-3.5">
-                            <span className="text-sm text-gray-700">{hoursWorked(rec.check_in, rec.check_out)}</span>
+                            <span className="text-sm text-gray-700">{formatHours(rec.hours_worked)}</span>
                           </td>
                           <td className="px-4 py-3.5">
                             {meta ? (
@@ -421,7 +443,7 @@ export default function Attendance() {
                               <span className="text-xs text-gray-300 italic">Not marked</span>
                             )}
                           </td>
-                          {(canAmend || rec.id === user?.id) && (
+                          {canMark && (
                             <td className="px-5 py-3.5 text-right">
                               <button onClick={() => setModalEmp(rec)}
                                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100
