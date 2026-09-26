@@ -86,3 +86,14 @@ export function isCalendarDate(value: string): boolean {
   const parsed = new Date(`${value}T00:00:00Z`)
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value
 }
+
+/**
+ * A calendar day moved by whole days — the day before a raise takes effect, the
+ * end of a notice period. Pure calendar arithmetic, done in UTC where there is
+ * no daylight saving to shift the answer.
+ */
+export function addCalendarDays(day: CalendarDate, days: number): CalendarDate {
+  const d = new Date(`${day}T00:00:00.000Z`)
+  d.setUTCDate(d.getUTCDate() + days)
+  return d.toISOString().slice(0, 10)
+}

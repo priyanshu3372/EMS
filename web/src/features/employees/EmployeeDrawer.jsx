@@ -1,47 +1,63 @@
-import { createElement, useState } from 'react'
+import { createElement } from 'react'
 import {
-  X, Mail, Phone, Building2, Briefcase, Calendar, BadgeCheck, FileText, Edit2, Users, IndianRupee,
-  Landmark, CheckCircle2, XCircle, ShieldCheck
+  X, Mail, Phone, Building2, Briefcase, Calendar, BadgeCheck, Edit2, Users, Clock,
+  Landmark, CheckCircle2, XCircle, UserRound, KeyRound, Fingerprint, CalendarX,
 } from 'lucide-react'
-import { useSalaryStructures } from '../../hooks/usePayroll'
-import BankVerificationModal from '../payroll/BankVerificationModal'
-import { estimateSalary } from '../../lib/salaryEstimate'
+import { useAuthStore } from '../../stores/authStore'
+
+/**
+ * One employee, as the server holds them.
+ *
+ * Each section is shown only to somebody permitted to see it — salary to those
+ * who hold compensation, statutory numbers to those who hold identity, bank
+ * details to those who hold bank — because the server only SENDS those fields
+ * to them. Rendering the section anyway would show blanks that read as "none".
+ *
+ * What was removed, and why:
+ *   · The salary card fell back to an ESTIMATE computed from the CTC whenever no
+ *     salary was recorded, and presented it as the person's pay. Only recorded
+ *     figures are shown now.
+ *   · The documents list said "Not uploaded" for three documents it never
+ *     looked for. Documents arrive with their own module (Day 19).
+ *   · Bank verification ran against the old store; it moves to the server on
+ *     Day 19. The recorded details are shown here read-only until then.
+ */
+
+const EMPLOYMENT_TYPE = {
+  full_time: { label: 'Full-time', cls: 'bg-blue-100 text-blue-700' },
+  part_time: { label: 'Part-time', cls: 'bg-amber-100 text-amber-700' },
+  contract: { label: 'Contract', cls: 'bg-purple-100 text-purple-700' },
+  intern: { label: 'Intern', cls: 'bg-teal-100 text-teal-700' },
+}
 
 const STATUS_CLASS = {
   active: 'bg-green-100 text-green-700',
   inactive: 'bg-red-100 text-red-600',
 }
 
-const EMP_TYPE_CLASS = {
-  'Full-time': 'bg-blue-100 text-blue-700',
-  'Part-time': 'bg-amber-100 text-amber-700',
-  Contract: 'bg-purple-100 text-purple-700',
-  Intern: 'bg-teal-100 text-teal-700',
+const ATTENDANCE_MODE = { app: 'App punch-in', biometric: 'Biometric machine', manual: 'Marked by HR' }
+const GENDER = { male: 'Male', female: 'Female', other: 'Other' }
+const ACCOUNT = { active: 'Can sign in', invited: 'Invited — has not set a password', inactive: 'Access removed' }
+
+function money(value) {
+  return value == null ? '—' : '₹' + Number(value).toLocaleString('en-IN')
 }
 
-function fmt(n) { return '₹' + Number(n || 0).toLocaleString('en-IN') }
+function formatDate(day) {
+  if (!day) return '—'
+  return new Date(`${day}T00:00:00Z`).toLocaleDateString('en-IN', {
+    day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC',
+  })
+}
 
 export default function EmployeeDrawer({ employee, onClose, onEdit }) {
-  const { data: salaryStructures = [] } = useSalaryStructures()
-  const [bankModalOpen, setBankModalOpen] = useState(false)
-  const [bankModalMode, setBankModalMode] = useState('review')
+  const can = useAuthStore((state) => state.can)
 
   if (!employee) return null
 
-  const initials = employee.full_name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()
-  const ssRecord = salaryStructures.find(s => s.employee_id === employee.id || s.profiles?.id === employee.id)
-  const ctcVal = employee.ctc || ssRecord?.ctc || 0
-  const computed = estimateSalary(ctcVal)
-
-  const grossMonthly = ssRecord?.gross ?? computed.gross
-  const basic = ssRecord?.basic ?? computed.basic
-  const hra = ssRecord?.hra ?? computed.hra
-  const da = ssRecord?.da ?? computed.da
-  const special = ssRecord?.special_allowance ?? computed.special
-  const pf = ssRecord?.pf ?? computed.pf
-  const esi = ssRecord?.esi ?? computed.esi
-  const pt = ssRecord?.pt ?? computed.pt
-  const netMonthly = ssRecord?.net_salary ?? computed.net
+  const initials = (employee.full_name || '').split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()
+  const type = EMPLOYMENT_TYPE[employee.employment_type]
+  const components = employee.components ?? []
 
   return (
     <>
@@ -55,11 +71,13 @@ export default function EmployeeDrawer({ employee, onClose, onEdit }) {
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 shrink-0">
           <p className="text-base font-semibold text-gray-900">Employee Profile</p>
           <div className="flex items-center gap-2">
-            <button onClick={onEdit}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 text-sm font-medium transition-colors">
-              <Edit2 className="w-3.5 h-3.5" />
-              Edit
-            </button>
+            {can('employee:update') && (
+              <button onClick={onEdit}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 text-sm font-medium transition-colors">
+                <Edit2 className="w-3.5 h-3.5" />
+                Edit
+              </button>
+            )}
             <button onClick={onClose}
               className="p-2 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors">
               <X className="w-4 h-4" />
@@ -71,21 +89,23 @@ export default function EmployeeDrawer({ employee, onClose, onEdit }) {
         <div className="flex-1 overflow-y-auto">
 
           {/* Profile header */}
-          <div className="px-6 py-6 bg-gradient-to-br from-blue-50 to-white border-b border-gray-100">
+          <div className="px-6 py-6 bg-linear-to-br from-blue-50 to-white border-b border-gray-100">
             <div className="flex items-start gap-4">
               <div className="w-16 h-16 rounded-2xl bg-blue-600 flex items-center justify-center shrink-0">
                 <span className="text-white text-xl font-bold">{initials}</span>
               </div>
               <div className="min-w-0 pt-1">
                 <h2 className="text-xl font-bold text-gray-900 truncate">{employee.full_name}</h2>
-                <p className="text-sm text-gray-500 mt-0.5">{employee.designation}</p>
+                <p className="text-sm text-gray-500 mt-0.5">{employee.designation || 'No designation'}</p>
                 <div className="flex items-center gap-2 mt-2 flex-wrap">
                   <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${STATUS_CLASS[employee.status] ?? 'bg-gray-100 text-gray-700'}`}>
                     {employee.status}
                   </span>
-                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${EMP_TYPE_CLASS[employee.employment_type] ?? 'bg-gray-100 text-gray-700'}`}>
-                    {employee.employment_type}
-                  </span>
+                  {type && (
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${type.cls}`}>
+                      {type.label}
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
@@ -95,130 +115,118 @@ export default function EmployeeDrawer({ employee, onClose, onEdit }) {
           <div className="px-6 py-5 space-y-6">
 
             <Section title="Contact Information">
-              <InfoRow icon={Mail} label="Work Email" value={employee.email} />
+              <InfoRow icon={Mail} label="Work Email (login)" value={employee.email || 'No login'} />
+              <InfoRow icon={Mail} label="Personal Email" value={employee.personal_email || '—'} />
               <InfoRow icon={Phone} label="Phone" value={employee.phone || '—'} />
             </Section>
 
             <Section title="Employment Details">
-              <InfoRow icon={BadgeCheck} label="Employee ID" value={employee.employee_id} />
-              <InfoRow icon={Building2} label="Department" value={employee.department} />
-              <InfoRow icon={Briefcase} label="Designation" value={employee.designation} />
+              <InfoRow icon={BadgeCheck} label="Employee Code" value={employee.employee_id} />
+              <InfoRow icon={Building2} label="Department" value={employee.department || '—'} />
+              <InfoRow icon={Briefcase} label="Designation" value={employee.designation || '—'} />
               <InfoRow icon={Calendar} label="Date of Joining" value={formatDate(employee.date_of_joining)} />
-              <InfoRow icon={Users} label="Reporting Manager" value={employee.reporting_manager_name ? `${employee.reporting_manager_name} (${employee.reporting_manager_designation || 'Manager'})` : '—'} />
+              {employee.last_working_date && (
+                <InfoRow icon={CalendarX} label="Last Working Day" value={formatDate(employee.last_working_date)} />
+              )}
+              <InfoRow icon={Clock} label="Shift"
+                value={employee.shift ? `${employee.shift.name} (${employee.shift.start_time}–${employee.shift.end_time})` : '—'} />
+              <InfoRow icon={Fingerprint} label="Attendance" value={ATTENDANCE_MODE[employee.attendance_mode] ?? '—'} />
+              <InfoRow icon={Users} label="Reporting Manager"
+                value={employee.reporting_manager_name
+                  ? `${employee.reporting_manager_name}${employee.reporting_manager_designation ? ` (${employee.reporting_manager_designation})` : ''}`
+                  : '—'} />
+              <InfoRow icon={UserRound} label="Gender" value={GENDER[employee.gender] ?? 'Not recorded'} />
+              <InfoRow icon={KeyRound} label="Access"
+                value={employee.account_status ? `${ACCOUNT[employee.account_status] ?? employee.account_status}${employee.role ? ` · ${employee.role}` : ''}` : 'No login'} />
             </Section>
 
-            <Section title="Salary & Compensation">
-              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-xs text-slate-400 font-medium">Annual CTC</p>
-                    <p className="text-lg font-bold text-slate-900">{fmt(ctcVal)}</p>
+            {can('employee:compensation:read') && (
+              <Section title="Salary">
+                {employee.ctc == null ? (
+                  // Null is "not recorded". Zero would say they earn nothing.
+                  <p className="text-sm text-gray-500 bg-slate-50 border border-slate-200 rounded-xl p-4">
+                    No salary is recorded for this employee yet. Accounts sets it under Payroll → Salary Structure.
+                  </p>
+                ) : (
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-xs text-slate-400 font-medium">Annual CTC</p>
+                        <p className="text-lg font-bold text-slate-900">{money(employee.ctc)}</p>
+                      </div>
+                      <p className="text-xs text-slate-400 text-right">Since {formatDate(employee.salary_effective_from)}</p>
+                    </div>
+                    {components.length > 0 && (
+                      <div className="border-t border-slate-200/80 pt-2.5 grid grid-cols-2 gap-2 text-xs">
+                        {components.map((c) => (
+                          <div key={c.code}>
+                            <span className="text-slate-400">{c.label}:</span>{' '}
+                            <span className="font-semibold text-slate-700">{money(c.amount)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                  <div className="text-right">
-                    <p className="text-xs text-slate-400 font-medium">Net Take-Home / mo</p>
-                    <p className="text-base font-bold text-emerald-600">{fmt(netMonthly)}</p>
-                  </div>
-                </div>
+                )}
+              </Section>
+            )}
 
-                <div className="border-t border-slate-200/80 pt-2.5 grid grid-cols-2 gap-2 text-xs">
-                  <div>
-                    <span className="text-slate-400">Gross / Month:</span> <span className="font-semibold text-slate-700">{fmt(grossMonthly)}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-400">Basic Pay:</span> <span className="font-semibold text-slate-700">{fmt(basic)}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-400">HRA:</span> <span className="font-semibold text-slate-700">{fmt(hra)}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-400">DA:</span> <span className="font-semibold text-slate-700">{fmt(da)}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-400">Special Allowance:</span> <span className="font-semibold text-slate-700">{fmt(special)}</span>
-                  </div>
-                </div>
+            {can('employee:identity:read') && (
+              <Section title="Statutory Details">
+                <InfoRow icon={BadgeCheck} label="PAN" value={employee.pan || '—'} />
+                <InfoRow icon={BadgeCheck} label="UAN" value={employee.uan || 'Not issued yet'} />
+                <InfoRow icon={BadgeCheck} label="PF Member ID" value={employee.pf_acc_no || '—'} />
+                <InfoRow icon={BadgeCheck} label="ESIC Number" value={employee.esi_number || '—'} />
+                <InfoRow icon={Building2} label="PT State" value={employee.pt_state || 'Not recorded'} />
+                <InfoRow icon={BadgeCheck} label="Provident Fund"
+                  value={employee.pf_applicable === false ? 'Does not apply'
+                    : employee.has_prior_pf_membership == null ? 'Applies · prior membership not asked'
+                    : employee.has_prior_pf_membership ? 'Applies · was a member before' : 'Applies · first PF membership'} />
+              </Section>
+            )}
 
-                <div className="bg-white p-2.5 rounded-lg border border-slate-200/60 flex items-center justify-between text-xs">
-                  <span className="text-slate-500 font-medium">Standard Deductions (PF, ESI, PT)</span>
-                  <span className="font-bold text-red-500">− {fmt((pf || 0) + (esi || 0) + (pt || 0))}</span>
-                </div>
-              </div>
-            </Section>
-
-            <Section title="Bank Account for Salary Credit">
-              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
-                <div className="flex items-center justify-between">
+            {can('employee:bank:read') && (
+              <Section title="Bank Account for Salary Credit">
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
                   <div className="flex items-center gap-2">
                     <Landmark className="w-4 h-4 text-blue-600" />
-                    <span className="text-sm font-semibold text-slate-900">{employee.bank_name || 'Bank details pending'}</span>
+                    <span className="text-sm font-semibold text-slate-900">{employee.bank_name || 'No bank details recorded'}</span>
                   </div>
-                  <button
-                    onClick={() => {
-                      setBankModalMode('review')
-                      setBankModalOpen(true)
-                    }}
-                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 text-xs font-semibold transition-colors"
-                  >
-                    <ShieldCheck className="w-3.5 h-3.5" /> Verify / Manage
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 text-xs pt-1 border-t border-slate-200/80">
-                  <div>
-                    <span className="text-slate-400">Account No:</span>{' '}
-                    <span className="font-mono font-bold text-slate-800">{employee.bank_account || '—'}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-400">IFSC Code:</span>{' '}
-                    <span className="font-mono font-semibold text-blue-700">{employee.ifsc || '—'}</span>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between text-xs pt-2 border-t border-slate-200/60">
-                  <span className="text-slate-500 font-medium">Status</span>
-                  {employee.bank_verification_status === 'verified' && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-800">
-                      <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Verified
-                    </span>
-                  )}
-                  {(employee.bank_verification_status === 'pending' || !employee.bank_verification_status) && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-100 text-amber-800">
-                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" /> Pending
-                    </span>
-                  )}
-                  {employee.bank_verification_status === 'rejected' && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-rose-100 text-rose-800">
-                      <XCircle className="w-3 h-3 text-rose-600" /> Rejected
-                    </span>
-                  )}
-                </div>
-              </div>
-            </Section>
-
-            <Section title="Documents">
-              <div className="space-y-2">
-                {['Offer Letter', 'Aadhaar Card', 'PAN Card'].map((doc) => (
-                  <div key={doc} className="flex items-center justify-between p-3 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors">
-                    <div className="flex items-center gap-2.5">
-                      <FileText className="w-4 h-4 text-gray-400" />
-                      <span className="text-sm text-gray-700">{doc}</span>
+                  {employee.bank_account && (
+                    <div className="grid grid-cols-2 gap-2 text-xs pt-1 border-t border-slate-200/80">
+                      <div>
+                        <span className="text-slate-400">Account No:</span>{' '}
+                        <span className="font-mono font-bold text-slate-800">{employee.bank_account}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400">IFSC Code:</span>{' '}
+                        <span className="font-mono font-semibold text-blue-700">{employee.ifsc || '—'}</span>
+                      </div>
                     </div>
-                    <span className="text-xs text-gray-400">Not uploaded</span>
+                  )}
+                  <div className="flex items-center justify-between text-xs pt-2 border-t border-slate-200/60">
+                    <span className="text-slate-500 font-medium">Verification</span>
+                    {employee.bank_verification_status === 'verified' ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-800">
+                        <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Verified
+                      </span>
+                    ) : employee.bank_verification_status === 'rejected' ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-rose-100 text-rose-800">
+                        <XCircle className="w-3 h-3 text-rose-600" /> Rejected
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-gray-100 text-gray-600 capitalize">
+                        {employee.bank_verification_status || 'unverified'}
+                      </span>
+                    )}
                   </div>
-                ))}
-              </div>
-            </Section>
+                </div>
+              </Section>
+            )}
 
           </div>
         </div>
       </div>
-
-      <BankVerificationModal
-        open={bankModalOpen}
-        onClose={() => setBankModalOpen(false)}
-        profile={employee}
-        mode={bankModalMode}
-      />
     </>
   )
 }
@@ -244,10 +252,4 @@ function InfoRow({ icon, label, value }) {
       </div>
     </div>
   )
-}
-
-function formatDate(str) {
-  if (!str) return '—'
-  const d = new Date(str)
-  return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
 }

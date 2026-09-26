@@ -1,259 +1,92 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { supabase } from '../lib/supabase'
-import { sendNotification } from './useNotifications'
-import { estimateWithOverrides } from '../lib/salaryEstimate'
+import { api } from '../api/http'
+
+/**
+ * Employees, from the server.
+ *
+ * This file used to talk to Supabase — and, with no Supabase configured, to a
+ * mock kept in the browser's localStorage. So the Employees page showed people
+ * who did not exist anywhere the rest of the system could see: the attendance
+ * roster, leave and payroll all read the real server and matched none of them.
+ *
+ * What the old create did that this does not, deliberately:
+ *   · take a password — a new person gets an invitation link instead, so
+ *     nobody types a colleague's first password into a form;
+ *   · save salary — that is Accounts' to set, under Payroll, and the employee
+ *     endpoints refuse a salary field outright;
+ *   · save bank details — those go through their own verification flow;
+ *   · notify hardcoded "demo-hr-admin-id" users who never existed.
+ *
+ * Bodies are sent in the server's shape (camelCase). Responses come back in
+ * the snake_case the pages already read.
+ */
+
+const KEY = ['employees']
+
+function invalidateAll(queryClient) {
+  queryClient.invalidateQueries({ queryKey: KEY })
+  // The attendance roster lists employees too; a new hire belongs on it today.
+  queryClient.invalidateQueries({ queryKey: ['attendance'] })
+  queryClient.invalidateQueries({ queryKey: ['users'] })
+}
 
 export function useEmployees() {
   return useQuery({
-    queryKey: ['employees'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .order('full_name')
-      if (error) throw error
-      return data
-    },
+    queryKey: KEY,
+    queryFn: async () => (await api.get('/employees')).data,
   })
 }
 
+/**
+ * The company's departments, designations and shifts — the choices an employee
+ * form offers, as ids. They change rarely, so they are kept for a while.
+ */
+export function useMasterData() {
+  return useQuery({
+    queryKey: ['master-data'],
+    queryFn: async () => (await api.get('/master-data')).data,
+    staleTime: 5 * 60_000,
+  })
+}
+
+/**
+ * Creates an employee, with a login if one was asked for.
+ *
+ * Returns the invitation alongside the employee: the link is issued once and
+ * the server keeps only its hash, so this response is the only place it is
+ * ever seen.
+ */
 export function useCreateEmployee() {
-  const qc = useQueryClient()
+  const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: async (form) => {
-      const ctc = Number(form.ctc) || 0
-      const { data, error } = await supabase.rpc('create_employee_account', {
-        p_email: form.email,
-        p_password: form.password,
-        p_full_name: form.full_name,
-        p_role: form.role || 'employee',
-        p_employee_id: form.employee_id,
-        p_department: form.department,
-        p_designation: form.designation,
-        p_phone: form.phone || '',
-        p_employment_type: form.employment_type,
-        p_date_of_joining: form.date_of_joining,
-        p_status: form.status,
-        p_ctc: ctc,
-        p_basic: form.basic !== undefined && form.basic !== '' ? Number(form.basic) : undefined,
-        p_hra: form.hra !== undefined && form.hra !== '' ? Number(form.hra) : undefined,
-        p_da: form.da !== undefined && form.da !== '' ? Number(form.da) : undefined,
-        p_special_allowance: form.special_allowance !== undefined && form.special_allowance !== '' ? Number(form.special_allowance) : undefined,
-        p_pf: form.pf !== undefined && form.pf !== '' ? Number(form.pf) : undefined,
-        p_esi: form.esi !== undefined && form.esi !== '' ? Number(form.esi) : undefined,
-        p_pt: form.pt !== undefined && form.pt !== '' ? Number(form.pt) : undefined,
-        p_reporting_manager_id: form.reporting_manager_id || null,
-        p_reporting_manager_name: form.reporting_manager_name || null,
-        p_reporting_manager_designation: form.reporting_manager_designation || null,
-      })
-      if (error) throw error
-
-      if (data && (form.bank_name || form.bank_account)) {
-        await supabase.from('profiles').update({
-          bank_name: form.bank_name,
-          bank_account: form.bank_account,
-          bank_account_holder_name: form.bank_account_holder_name || form.full_name,
-          ifsc: form.ifsc,
-          bank_branch: form.bank_branch || 'Main Branch',
-          bank_account_type: form.bank_account_type || 'Savings',
-          bank_verification_status: 'verified',
-        }).eq('id', data)
-      }
-
-      if (data && (ctc > 0 || form.basic !== undefined)) {
-        const { gross, basic, hra, da, special: special_allowance, pf, esi, pt, net } =
-          estimateWithOverrides(ctc, { ...form, special: form.special_allowance })
-
-        await supabase.from('salary_structures').upsert({
-          employee_id: data,
-          ctc,
-          gross,
-          basic,
-          hra,
-          da,
-          special_allowance,
-          pf,
-          esi,
-          pt,
-          net_salary: net
-        }, { onConflict: 'employee_id' })
-      }
-
-      if (data) {
-        await sendNotification({
-          userId: data,
-          title: 'Welcome to EMS',
-          message: `Welcome ${form.full_name}! Your employee account setup is complete.`,
-          type: 'system',
-          link: '/dashboard'
-        })
-      }
-
-      await sendNotification({
-        userIds: ['demo-hr-admin-id', 'demo-super-admin-id'],
-        title: 'New Employee Registered',
-        message: `Profile created for ${form.full_name} (${form.employee_id || 'EMP'}).`,
-        type: 'employee',
-        link: '/employees'
-      })
-
-      return data
+    mutationFn: async (body) => {
+      const payload = await api.post('/employees', body)
+      return { employee: payload.data, invite: payload.meta?.invite ?? null }
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['employees'] })
-      qc.invalidateQueries({ queryKey: ['salary_structures'] })
-      qc.invalidateQueries({ queryKey: ['notifications'] })
-    },
+    onSuccess: () => invalidateAll(queryClient),
   })
 }
 
+/** Edits an employee. No role, status or salary — the server refuses all three. */
 export function useUpdateEmployee() {
-  const qc = useQueryClient()
+  const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: async ({ id, ctc, basic, hra, da, special_allowance, pf, esi, pt, ...updates }) => {
-      const profileUpdates = { ...updates }
-      if (ctc !== undefined) profileUpdates.ctc = Number(ctc) || 0
-
-      const { error } = await supabase.from('profiles').update(profileUpdates).eq('id', id)
-      if (error) throw error
-
-      if (id && (ctc !== undefined || basic !== undefined)) {
-        const numericCtc = Number(ctc) || 0
-        const {
-          gross,
-          basic: numBasic,
-          hra: numHra,
-          da: numDa,
-          special: numSpecial,
-          pf: numPf,
-          esi: numEsi,
-          pt: numPt,
-          net,
-        } = estimateWithOverrides(numericCtc, { basic, hra, da, special: special_allowance, pf, esi, pt })
-
-        await supabase.from('salary_structures').upsert({
-          employee_id: id,
-          ctc: numericCtc,
-          gross,
-          basic: numBasic,
-          hra: numHra,
-          da: numDa,
-          special_allowance: numSpecial,
-          pf: numPf,
-          esi: numEsi,
-          pt: numPt,
-          net_salary: net
-        }, { onConflict: 'employee_id' })
-      }
-
-      if (id) {
-        await sendNotification({
-          userId: id,
-          title: 'Profile Updated',
-          message: 'Your employee profile information was updated.',
-          type: 'profile',
-          link: '/dashboard'
-        })
-      }
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['employees'] })
-      qc.invalidateQueries({ queryKey: ['salary_structures'] })
-      qc.invalidateQueries({ queryKey: ['notifications'] })
-    },
+    mutationFn: async ({ id, ...body }) => (await api.patch(`/employees/${id}`, body)).data,
+    onSuccess: () => invalidateAll(queryClient),
   })
 }
 
-export function useUpdateBankDetails() {
-  const qc = useQueryClient()
+/**
+ * The roster import: a dry run first, which saves nothing and says what is
+ * wrong with each line, then the real import — all or nothing. The real one
+ * returns each new person's invitation link, once.
+ */
+export function useImportEmployees() {
+  const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: async ({
-      employeeId,
-      bank_name,
-      bank_account,
-      bank_account_holder_name,
-      ifsc,
-      bank_branch,
-      bank_account_type,
-      bank_proof_name,
-      bank_proof_url,
-      employeeName,
-      isHrUpdate = false
-    }) => {
-      const updates = {
-        bank_name,
-        bank_account,
-        bank_account_holder_name,
-        ifsc,
-        bank_branch: bank_branch || 'Main Branch',
-        bank_account_type: bank_account_type || 'Savings',
-        bank_proof_name: bank_proof_name || 'cancelled_cheque.pdf',
-        ...(bank_proof_url ? { bank_proof_url } : {}),
-        bank_verification_status: isHrUpdate ? 'verified' : 'pending',
-        bank_verification_remarks: isHrUpdate
-          ? 'Updated and verified by HR/Finance.'
-          : 'Bank details submitted by employee for salary credit. Pending verification.',
-        ...(isHrUpdate ? { bank_verified_at: new Date().toISOString() } : { bank_verified_by: null, bank_verified_at: null })
-      }
-
-      const { error } = await supabase.from('profiles').update(updates).eq('id', employeeId)
-      if (error) throw error
-
-      if (!isHrUpdate) {
-        // Notify HR and Finance admins
-        await sendNotification({
-          userIds: ['demo-hr-admin-id', 'demo-payroll-admin-id', 'demo-super-admin-id'],
-          title: 'Bank Account Verification Required',
-          message: `${employeeName || 'An employee'} submitted updated bank account details for salary credit.`,
-          type: 'payroll',
-          link: '/payroll'
-        })
-      } else {
-        await sendNotification({
-          userId: employeeId,
-          title: 'Bank Account Updated',
-          message: 'Your bank account details for salary credit have been updated and verified by HR/Finance.',
-          type: 'payroll',
-          link: '/dashboard'
-        })
-      }
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['employees'] })
-      qc.invalidateQueries({ queryKey: ['notifications'] })
+    mutationFn: async ({ csv, dryRun }) => (await api.post('/employees/import', { csv, dryRun })).data,
+    onSuccess: (_data, { dryRun }) => {
+      if (!dryRun) invalidateAll(queryClient)
     },
   })
 }
-
-export function useVerifyBankAccount() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: async ({ employeeId, status, remarks, verifiedBy, employeeName }) => {
-      const isApproved = status === 'verified'
-      const updates = {
-        bank_verification_status: status,
-        bank_verification_remarks: remarks || (isApproved ? 'Verified for salary credit by HR/Finance.' : 'Rejected. Please review and update account details.'),
-        bank_verified_by: verifiedBy || 'HR/Finance',
-        bank_verified_at: new Date().toISOString()
-      }
-
-      const { error } = await supabase.from('profiles').update(updates).eq('id', employeeId)
-      if (error) throw error
-
-      await sendNotification({
-        userId: employeeId,
-        title: isApproved ? 'Bank Account Verified' : 'Bank Account Submission Rejected',
-        message: isApproved
-          ? 'Your bank account details for salary credit have been successfully verified by HR/Finance.'
-          : `Your bank account details submission was rejected for ${employeeName || 'account'}: ${remarks || 'Incorrect information'}. Please re-submit valid account details.`,
-        type: 'payroll',
-        link: '/dashboard'
-      })
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['employees'] })
-      qc.invalidateQueries({ queryKey: ['notifications'] })
-    },
-  })
-}
-

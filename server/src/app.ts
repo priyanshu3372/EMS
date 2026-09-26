@@ -14,6 +14,7 @@ import { attendanceRouter } from './http/routes/attendance.routes'
 import { leaveRouter } from './http/routes/leave.routes'
 import { dashboardRouter } from './http/routes/dashboard.routes'
 import { payrollRouter } from './http/routes/payroll.routes'
+import { masterDataRouter } from './http/routes/masterData.routes'
 
 /**
  * Assembles the app but does not listen. main.ts owns the port, so tests can
@@ -62,6 +63,7 @@ export function createApp() {
   app.use('/api/leave-requests', leaveRouter)
   app.use('/api/dashboard', dashboardRouter)
   app.use('/api/payroll', payrollRouter)
+  app.use('/api/master-data', masterDataRouter)
 
   // Express 5 uses path-to-regexp v8: a bare '*' throws at startup.
   app.use('/{*splat}', notFound)

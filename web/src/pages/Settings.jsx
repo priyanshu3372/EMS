@@ -4,13 +4,14 @@ import {
   Save, Plus, Trash2, Edit2, X, Check,
   Mail, Shield, ToggleLeft, ToggleRight, ChevronRight,
   Globe, Clock, IndianRupee, Loader2, AlertCircle, MapPin, Compass, Navigation, LocateFixed, ShieldCheck,
-  KeyRound, UserPlus,
+  KeyRound, UserPlus, Network,
 } from 'lucide-react'
 import {
   useUsers, useUpdateUserRole,
   useToggleUserStatus, useDeleteUser, useIssuePasswordLink,
 } from '../hooks/useUsers'
 import { InviteUserForm, PasswordLinkPanel } from '../features/settings/UserAccess'
+import OrganisationSettings from '../features/settings/OrganisationSettings'
 import WeeklyOffPicker from '../features/settings/WeeklyOffPicker'
 import { useAuthStore } from '../stores/authStore'
 import {
@@ -936,6 +937,7 @@ function Section({ title, desc, children }) {
 const TABS = [
   { id: 'company',      label: 'Company',          icon: Building2 },
   { id: 'users',        label: 'Users & Roles',    icon: Users },
+  { id: 'organisation', label: 'Organisation',     icon: Network },
   { id: 'leave',        label: 'Leave Config',     icon: CalendarDays },
   { id: 'payroll',      label: 'Payroll Config',   icon: IndianRupee },
   { id: 'notifications',label: 'Notifications',    icon: Bell },
@@ -990,6 +992,7 @@ export default function Settings() {
         <div className="flex-1 min-w-0">
           {tab === 'company'       && <CompanySettings />}
           {tab === 'users'         && <UsersSettings />}
+          {tab === 'organisation'  && <OrganisationSettings />}
           {tab === 'leave'         && <LeaveSettings />}
           {tab === 'payroll'       && <PayrollSettings />}
           {tab === 'notifications' && <NotifSettings />}

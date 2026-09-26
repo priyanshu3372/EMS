@@ -1,5 +1,12 @@
 import { Router } from 'express'
-import { getComponents, postCalculate, postEsiRedecide } from '../controllers/payroll.controller'
+import {
+  getComponents,
+  postCalculate,
+  postEsiRedecide,
+  getSalaryRoster,
+  getSalaryHistory,
+  putSalary,
+} from '../controllers/payroll.controller'
 import { authenticate } from '../middleware/authenticate'
 import { authorize } from '../middleware/authorize'
 
@@ -25,3 +32,8 @@ payrollRouter.post(
   authorize('payroll:structure:manage'),
   postEsiRedecide,
 )
+
+// Salary structures — "Accounts creates salary structure → creates payroll run".
+payrollRouter.get('/employees', authorize('payroll:structure:read'), getSalaryRoster)
+payrollRouter.get('/employees/:id/salary', authorize('payroll:structure:read'), getSalaryHistory)
+payrollRouter.put('/employees/:id/salary', authorize('payroll:structure:manage'), putSalary)

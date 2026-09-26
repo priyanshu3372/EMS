@@ -3,7 +3,7 @@ import {
   X, Landmark, CheckCircle2, XCircle, AlertTriangle, FileText,
   Upload, Check, ShieldCheck, Edit3, Loader2, CreditCard, Building2, User, Eye
 } from 'lucide-react'
-import { useUpdateBankDetails, useVerifyBankAccount } from '../../hooks/useEmployees'
+import { useUpdateBankDetails, useVerifyBankAccount } from '../../hooks/useBankDetails'
 import { useAuthStore } from '../../stores/authStore'
 
 const POPULAR_BANKS = [

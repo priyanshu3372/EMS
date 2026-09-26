@@ -10,6 +10,7 @@ import { useEmployees } from '../hooks/useEmployees'
 import { usePayrollRuns, useCreatePayrollRun, useUpdatePayrollRun, usePayslips, useSalaryStructures } from '../hooks/usePayroll'
 import { useAuthStore } from '../stores/authStore'
 import { estimateSalary } from '../lib/salaryEstimate'
+import SalaryStructures from '../features/payroll/SalaryStructures'
 
 // ─── Salary computation ───────────────────────────────────────────────────────
 
@@ -264,104 +265,10 @@ function RunsTab({ employees }) {
 }
 
 // ─── Salary Structure tab ─────────────────────────────────────────────────────
-
-function SalaryTab({ employees }) {
-  const [search, setSearch] = useState('')
-
-  const filtered = employees.filter((e) => {
-    const q = search.toLowerCase()
-    return !q || (e.full_name || '').toLowerCase().includes(q) || (e.department || '').toLowerCase().includes(q)
-  })
-
-  function handleExportSalary() {
-    const headers = ['Employee Name', 'Department', 'Designation', 'Annual CTC', 'Basic Pay', 'HRA', 'DA', 'Special Allowance', 'Gross Monthly', 'PF', 'ESI', 'PT', 'Net Monthly']
-    const rows = filtered.map((e) => [
-      e.full_name || '',
-      e.department || '',
-      e.designation || '',
-      e.ctc || 0,
-      e.salary?.basic || 0,
-      e.salary?.hra || 0,
-      e.salary?.da || 0,
-      e.salary?.special || 0,
-      e.salary?.gross || 0,
-      e.salary?.pf || 0,
-      e.salary?.esi || 0,
-      e.salary?.pt || 0,
-      e.salary?.net || 0,
-    ])
-    const lines = [headers.join(','), ...rows.map((r) => r.map((v) => `"${v}"`).join(','))]
-    const blob = new Blob([lines.join('\n')], { type: 'text/csv' })
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
-    a.download = `salary_structures_${new Date().toISOString().slice(0, 10)}.csv`
-    a.click()
-  }
-
-  return (
-    <div className="space-y-4">
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm px-4 py-3 flex gap-3 items-center flex-wrap">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <input type="text" placeholder="Search employee or department…" value={search} onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg text-sm
-              focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder:text-gray-400" />
-        </div>
-        <span className="text-sm text-gray-400 shrink-0">{filtered.length} employees</span>
-        <button onClick={handleExportSalary} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 text-sm font-medium text-gray-700 transition-colors shrink-0">
-          <Download className="w-4 h-4" /> Export
-        </button>
-      </div>
-
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[900px]">
-            <thead>
-              <tr className="bg-gray-50 border-b border-gray-200">
-                <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Employee</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">CTC (Annual)</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Basic</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">HRA</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Gross / mo</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">PF / mo</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Net / mo</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.length === 0 ? (
-                <tr><td colSpan={7} className="text-center py-16 text-sm text-gray-400">No salary data yet.</td></tr>
-              ) : filtered.map((emp) => (
-                <tr key={emp.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                  <td className="px-5 py-3.5">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
-                        <span className="text-blue-700 text-xs font-semibold">{initials(emp.full_name)}</span>
-                      </div>
-                      <div>
-                        <p className="text-sm font-medium text-gray-900">{emp.full_name}</p>
-                        <p className="text-xs text-gray-400">{emp.department}</p>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3.5 text-right text-sm font-semibold text-gray-900">{fmt(emp.ctc)}</td>
-                  <td className="px-4 py-3.5 text-right text-sm text-gray-700">{fmt(emp.salary.basic)}</td>
-                  <td className="px-4 py-3.5 text-right text-sm text-gray-700">{fmt(emp.salary.hra)}</td>
-                  <td className="px-4 py-3.5 text-right text-sm text-gray-700">{fmt(emp.salary.gross)}</td>
-                  <td className="px-4 py-3.5 text-right text-sm text-red-500">{fmt(emp.salary.pf)}</td>
-                  <td className="px-4 py-3.5 text-right text-sm font-semibold text-green-600">{fmt(emp.salary.net)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div className="px-5 py-3 bg-blue-50 border-t border-blue-100 flex items-center gap-2">
-          <AlertCircle className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-          <p className="text-xs text-blue-600">PF = 12% of Basic · ESI = 0.75% of Gross (if Gross ≤ ₹21,000) · PT = ₹200/month (Maharashtra)</p>
-        </div>
-      </div>
-    </div>
-  )
-}
+//
+// Now features/payroll/SalaryStructures.jsx, reading the server. The table that
+// was here showed an estimate — CTC ÷ 12 split by fixed percentages — as if it
+// were each person's recorded salary.
 
 // ─── Payslips tab ─────────────────────────────────────────────────────────────
 
@@ -786,7 +693,7 @@ export default function Payroll() {
       </div>
 
       {tab === 'runs'          && <RunsTab employees={employees} />}
-      {tab === 'structure'     && <SalaryTab employees={employees} />}
+      {tab === 'structure'     && <SalaryStructures />}
       {tab === 'payslips'      && <PayslipsTab employees={employees} />}
       {tab === 'bank_accounts' && <BankAccountsTab employees={employees} />}
     </div>
