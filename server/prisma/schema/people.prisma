@@ -59,6 +59,27 @@ model Employee {
   phone         String?
   dateOfJoining DateTime? @db.Date
 
+  /// The last day this person is paid for. Null while they still work here.
+  ///
+  /// Distinct from `status`: somebody serving notice is still active, and their
+  /// final payslip has to stop on this date rather than at the end of the
+  /// month. Without it a mid-month leaver is paid for days after they left,
+  /// and the overpayment is only discovered when somebody tries to recover it.
+  lastWorkingDate DateTime? @db.Date
+
+  /// Nullable, because nobody should be forced to guess it to save a record.
+  ///
+  /// Not a demographic nicety: professional tax is gendered by statute in
+  /// several states — Maharashtra exempts women up to 25,000 where men pay
+  /// from 7,500 — so without this every woman is over-deducted 200 a month.
+  /// The EPFO ECR and the ESIC return both require it as well, so the field
+  /// is owed to the government whatever payroll does with it.
+  ///
+  /// Null resolves to the `any` slab, and a state that has only gendered
+  /// slabs will deduct nothing until somebody fills this in — visibly wrong
+  /// rather than quietly wrong.
+  gender Gender?
+
   employmentType EmploymentType @default(full_time)
   status         EmployeeStatus @default(active)
 
@@ -97,6 +118,7 @@ model Employee {
   leaveLedger       LeaveLedgerEntry[]
   attendance        Attendance[]
   leaveRequests     LeaveRequest[]
+  esiCoverage       EsiCoverage[]
 
   @@unique([organizationId, employeeCode])
   @@index([organizationId, archivedAt])
@@ -117,13 +139,7 @@ model EmployeeFinancial {
 
   /// Decimal, never Float. 0.1 + 0.2 is not 0.3 in binary floating point, and
   /// money that is out by a paisa per row is money that does not reconcile.
-  ctc              Decimal @db.Decimal(12, 2)
-  basic            Decimal @db.Decimal(12, 2)
-  hra              Decimal @default(0) @db.Decimal(12, 2)
-  da               Decimal @default(0) @db.Decimal(12, 2)
-  /// §A1.5 lists Conveyance as a component the client wants.
-  conveyance       Decimal @default(0) @db.Decimal(12, 2)
-  specialAllowance Decimal @default(0) @db.Decimal(12, 2)
+  ctc Decimal @db.Decimal(12, 2)
 
   effectiveFrom DateTime  @db.Date
   /// Null means "current". Set when a later record supersedes this one.
@@ -134,6 +150,15 @@ model EmployeeFinancial {
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   employee     Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  /// What this person is paid, component by component.
+  ///
+  /// ROWS RATHER THAN COLUMNS, and the reason is the client's own list: it ends
+  /// with Incentive, which had no column, so it could not be stored at all. The
+  /// next component after that would have needed a migration and a deploy —
+  /// which is how a payroll system ends up with an "Other Allowance" column
+  /// that six different things are stuffed into.
+  components EmployeeSalaryComponent[]
 
   @@unique([organizationId, employeeId, effectiveFrom])
   @@index([organizationId, employeeId])
@@ -194,6 +219,24 @@ model EmployeeStatutoryIdentity {
   /// different state from the head office.
   ptState         String?
 
+  /// Whether provident fund applies to this person at all.
+  ///
+  /// Per-employee, not per-company: an international worker, a re-employed
+  /// pensioner and an "excluded employee" who joined above the ceiling and was
+  /// never a member are all outside PF while their colleagues are inside it.
+  /// One company-wide switch would deduct from people it must not.
+  pfApplicable Boolean @default(true)
+
+  /// Was this person already a member of the provident fund somewhere else?
+  ///
+  /// Decides EPS membership, and only the employee can answer it — it is a fact
+  /// about their previous employment. NULL means nobody has asked yet, which is
+  /// treated as "no": a genuine new entrant above the ceiling is excluded from
+  /// the pension scheme, and that is the outcome the 2014 rule intends. Getting
+  /// it wrong changes the split between EPS and EPF, never the total, so it is
+  /// invisible on the payslip and wrong on every return until someone asks.
+  hasPriorPfMembership Boolean?
+
   createdAt DateTime @default(now()) @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @db.Timestamptz(3)
 
@@ -201,4 +244,15 @@ model EmployeeStatutoryIdentity {
   employee     Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
   @@index([organizationId])
+}
+
+/// Recorded for statutory returns and gendered professional tax.
+///
+/// `other` exists because people do; it maps to the `any` professional-tax
+/// slab, which is the only honest reading of a table the state wrote with
+/// two options.
+enum Gender {
+  male
+  female
+  other
 }

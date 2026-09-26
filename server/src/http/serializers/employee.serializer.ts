@@ -60,6 +60,10 @@ function base(employee: EmployeeRow) {
     designation_id: employee.designationId,
 
     date_of_joining: isoDate(employee.dateOfJoining),
+    // Null while they still work here.
+    last_working_date: isoDate(employee.lastWorkingDate),
+    // Null is "not recorded", which payroll reports rather than guesses around.
+    gender: employee.gender,
     employment_type: employee.employmentType,
     status: employee.status,
 
@@ -104,17 +108,43 @@ function compensation(employee: EmployeeRow) {
       da: null,
       conveyance: null,
       special_allowance: null,
+      components: [],
       salary_effective_from: null,
     }
   }
 
+  // Amounts are rows now, keyed by component code. The flat keys below are the
+  // shape every screen already reads; they are DERIVED from the rows, never
+  // stored beside them, so there is still exactly one source for each figure.
+  const byCode = new Map(current.components.map((row) => [row.component.code, row.amount]))
+
+  // A component this person is not paid is null, not zero — "no HRA on this
+  // salary" and "HRA of nothing" read the same on a screen and differently to
+  // an auditor.
+  const amount = (code: string) => {
+    const value = byCode.get(code)
+    return value === undefined ? null : money(value)
+  }
+
   return {
     ctc: money(current.ctc),
-    basic: money(current.basic),
-    hra: money(current.hra),
-    da: money(current.da),
-    conveyance: money(current.conveyance),
-    special_allowance: money(current.specialAllowance),
+    basic: amount('BASIC'),
+    hra: amount('HRA'),
+    da: amount('DA'),
+    conveyance: amount('CONV'),
+    special_allowance: amount('SPECIAL'),
+    // No `incentive`. It is entered per month, so a salary record never holds
+    // one, and a key here would always read null — which a screen would show
+    // as "no incentive" when the truth is "not decided on this record".
+    // Every component, including ones added after these keys were chosen. A
+    // screen that renders this list shows "Shift Allowance" the day somebody
+    // adds it, without a deploy.
+    components: current.components.map((row) => ({
+      code: row.component.code,
+      label: row.component.label,
+      type: row.component.type,
+      amount: money(row.amount),
+    })),
     salary_effective_from: isoDate(current.effectiveFrom),
   }
 }
@@ -165,6 +195,13 @@ function identity(employee: EmployeeRow) {
     pf_acc_no: record?.pfAccountNumber ?? null,
     esi_number: record?.esiNumber ?? null,
     pt_state: record?.ptState ?? null,
+    // Null only when there is no statutory record at all. Not shown as true
+    // even though payroll then applies PF by default: the screen reports what
+    // is stored, and nothing is.
+    pf_applicable: record?.pfApplicable ?? null,
+    // Null means nobody has asked. Kept distinct from false, because payroll
+    // treats "unknown" as a warning and "no" as an answer.
+    has_prior_pf_membership: record?.hasPriorPfMembership ?? null,
   }
 }
 

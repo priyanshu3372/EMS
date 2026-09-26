@@ -71,6 +71,25 @@ function scopeWhere(scope: ScopeContext): Prisma.EmployeeWhereInput {
 const IMPOSSIBLE: Prisma.EmployeeWhereInput = { id: { equals: '00000000-0000-0000-0000-000000000000' } }
 
 /**
+ * The salary record in force, with its component amounts.
+ *
+ * A named constant rather than an inline literal so that Prisma can see the
+ * nested include through the conditional spread below — inline, the literal
+ * types widen and the component rows vanish from the payload type.
+ */
+const CURRENT_SALARY = {
+  where: { effectiveTo: null },
+  orderBy: { effectiveFrom: 'desc' },
+  take: 1,
+  include: {
+    components: {
+      include: { component: { select: { code: true, label: true, type: true } } },
+      orderBy: { component: { displayOrder: 'asc' } },
+    },
+  },
+} satisfies Prisma.Employee$financialsArgs
+
+/**
  * What to join, decided by permission.
  *
  * The three sensitive tables are not fetched at all unless the caller may see
@@ -88,15 +107,28 @@ function includeFor(access: FieldAccess) {
     },
     membership: { select: { id: true, role: true, status: true, user: { select: { email: true } } } },
 
-    ...(access.includeCompensation
-      ? { financials: { where: { effectiveTo: null }, orderBy: { effectiveFrom: 'desc' }, take: 1 } }
-      : {}),
+    ...(access.includeCompensation ? { financials: CURRENT_SALARY } : {}),
     ...(access.includeBank ? { bankAccount: true } : {}),
     ...(access.includeIdentity ? { statutoryIdentity: true } : {}),
   } satisfies Prisma.EmployeeInclude
 }
 
-export type EmployeeRow = Prisma.EmployeeGetPayload<{ include: ReturnType<typeof includeFor> }>
+/**
+ * An employee as the repository returns it.
+ *
+ * Built in two steps because Prisma cannot type an OPTIONAL nested include —
+ * given `financials?: {...}` it falls back to the bare row and the component
+ * amounts disappear from the type. So the payload is computed as if salary
+ * were always fetched, and then made optional again, which is the truth: it is
+ * only there when the caller may see it.
+ */
+type WithSalary = Prisma.EmployeeGetPayload<{
+  include: Omit<ReturnType<typeof includeFor>, 'financials'> & { financials: typeof CURRENT_SALARY }
+}>
+
+export type EmployeeRow = Omit<WithSalary, 'financials'> & {
+  financials?: WithSalary['financials']
+}
 
 function filterWhere(filters: EmployeeFilters): Prisma.EmployeeWhereInput {
   const where: Prisma.EmployeeWhereInput = {}

@@ -44,6 +44,14 @@ const statutorySchema = z
     pfAccountNumber: optionalText(30),
     esiNumber: optionalText(20),
     ptState: optionalText(50),
+
+    /// Whether PF applies to this person at all. Per employee, because an
+    /// international worker or an excluded employee sits outside PF while
+    /// their colleagues are inside it.
+    pfApplicable: z.boolean().optional(),
+    /// Were they a PF member at a previous employer? Decides EPS membership.
+    /// Null is "nobody has asked yet", and payroll warns about it.
+    hasPriorPfMembership: z.boolean().nullish(),
   })
   .strict()
 
@@ -69,6 +77,14 @@ export const createEmployeeSchema = z
     personalEmail: z.email().nullish(),
     phone: optionalText(20),
     dateOfJoining: z.iso.date().nullish(),
+    /// The last day they are paid for. Checked against the joining date by the
+    /// service, which is the only place that knows the stored value on an edit.
+    lastWorkingDate: z.iso.date().nullish(),
+
+    /// Professional tax is gendered by statute in several states, and PF and
+    /// ESI returns both require it. Optional, because nobody should be forced
+    /// to guess it to save a record.
+    gender: z.enum(['male', 'female', 'other']).nullish(),
 
     employmentType: z.enum(['full_time', 'part_time', 'contract', 'intern']).optional(),
 

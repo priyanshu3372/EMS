@@ -321,6 +321,116 @@ describe('PATCH /api/employees/:id', () => {
   })
 })
 
+describe('the facts payroll needs about a person', () => {
+  const create = (body: Record<string, unknown>) =>
+    request(app).post('/api/employees').set('Authorization', as('hr')).send(body)
+
+  const edit = (id: string, body: Record<string, unknown>) =>
+    request(app).patch(`/api/employees/${id}`).set('Authorization', as('hr')).send(body)
+
+  it('records gender, the last working day and the PF facts, and returns them', async () => {
+    const res = await create({
+      employeeCode: `${PREFIX}-newpay1`,
+      fullName: 'Payroll Facts',
+      dateOfJoining: '2026-04-01',
+      lastWorkingDate: '2026-09-10',
+      gender: 'female',
+      statutory: { ptState: 'Maharashtra', pfApplicable: false, hasPriorPfMembership: true },
+    })
+
+    expect(res.status).toBe(201)
+    expect(res.body.data.gender).toBe('female')
+    expect(res.body.data.last_working_date).toBe('2026-09-10')
+    expect(res.body.data.pf_applicable).toBe(false)
+    expect(res.body.data.has_prior_pf_membership).toBe(true)
+
+    // And it is what is stored, not merely what was echoed back.
+    const stored = await prisma.employee.findUnique({
+      where: { id: res.body.data.id },
+      include: { statutoryIdentity: true },
+    })
+    expect(stored?.gender).toBe('female')
+    expect(stored?.lastWorkingDate?.toISOString().slice(0, 10)).toBe('2026-09-10')
+    expect(stored?.statutoryIdentity?.pfApplicable).toBe(false)
+    expect(stored?.statutoryIdentity?.hasPriorPfMembership).toBe(true)
+  })
+
+  it('leaves them unrecorded when not given, rather than inventing answers', async () => {
+    const res = await create({ employeeCode: `${PREFIX}-newpay2`, fullName: 'Nothing Said' })
+
+    expect(res.status).toBe(201)
+    expect(res.body.data.gender).toBeNull()
+    expect(res.body.data.last_working_date).toBeNull()
+    // No statutory record at all, so nothing to report — null, not a default.
+    expect(res.body.data.pf_applicable).toBeNull()
+    expect(res.body.data.has_prior_pf_membership).toBeNull()
+  })
+
+  it('refuses a last working day before the joining date, and writes nothing', async () => {
+    const res = await create({
+      employeeCode: `${PREFIX}-newpay3`,
+      fullName: 'Backwards',
+      dateOfJoining: '2026-09-15',
+      lastWorkingDate: '2026-09-01',
+    })
+
+    expect(res.status).toBe(400)
+    expect(res.body.error.message).toMatch(/cannot be before the joining date/)
+    expect(await prisma.employee.count({ where: { employeeCode: `${PREFIX}-newpay3` } })).toBe(0)
+  })
+
+  it('refuses a gender it does not know', async () => {
+    const res = await create({ employeeCode: `${PREFIX}-newpay4`, fullName: 'Typo', gender: 'femail' })
+    expect(res.status).toBe(422)
+  })
+
+  it('checks an edited last working day against the STORED joining date', async () => {
+    const created = await create({
+      employeeCode: `${PREFIX}-newpay5`,
+      fullName: 'Leaving Soon',
+      dateOfJoining: '2026-06-01',
+    })
+    const id = created.body.data.id
+
+    // Only one of the two dates is in the body. The other is the stored one.
+    const backwards = await edit(id, { lastWorkingDate: '2026-05-31' })
+    expect(backwards.status).toBe(400)
+
+    const ok = await edit(id, { lastWorkingDate: '2026-09-30' })
+    expect(ok.status).toBe(200)
+    expect(ok.body.data.last_working_date).toBe('2026-09-30')
+
+    // Moving the joining date past it is refused the same way.
+    const joinLater = await edit(id, { dateOfJoining: '2026-10-01' })
+    expect(joinLater.status).toBe(400)
+
+    // A resignation withdrawn: the date comes off again.
+    const withdrawn = await edit(id, { lastWorkingDate: null })
+    expect(withdrawn.status).toBe(200)
+    expect(withdrawn.body.data.last_working_date).toBeNull()
+  })
+
+  it('changes one PF fact without disturbing the rest of the statutory record', async () => {
+    const created = await create({
+      employeeCode: `${PREFIX}-newpay6`,
+      fullName: 'Asked Later',
+      statutory: { ptState: 'Maharashtra', uan: '100200300400' },
+    })
+    const id = created.body.data.id
+    expect(created.body.data.has_prior_pf_membership).toBeNull()
+
+    // HR finds out, weeks later, that they were a member at their last job.
+    const res = await edit(id, { statutory: { hasPriorPfMembership: true } })
+
+    expect(res.status).toBe(200)
+    expect(res.body.data.has_prior_pf_membership).toBe(true)
+    // Untouched: a partial edit is not a replacement.
+    expect(res.body.data.pt_state).toBe('Maharashtra')
+    expect(res.body.data.uan).toBe('100200300400')
+    expect(res.body.data.pf_applicable).toBe(true)
+  })
+})
+
 describe('PUT /api/users/:id/role', () => {
   const setRole = (actor: string, membershipId: string, role: string) =>
     request(app)

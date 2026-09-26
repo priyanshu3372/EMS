@@ -22,7 +22,8 @@
     "bootstrap": "tsx scripts/bootstrap.ts",
     "db:test": "tsx scripts/testDb.ts",
     "field-contract": "tsx scripts/fieldContract.ts",
-    "grant-leave": "tsx scripts/grantLeave.ts"
+    "grant-leave": "tsx scripts/grantLeave.ts",
+    "migration:new": "tsx scripts/newMigration.ts"
   },
   "dependencies": {
     "@prisma/client": "6.19.3",

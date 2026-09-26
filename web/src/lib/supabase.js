@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import { estimateWithOverrides } from './salaryEstimate'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -446,15 +447,16 @@ if (!supabaseUrl || !supabaseAnonKey || supabaseAnonKey === 'placeholder-anon-ke
         mockDatabase.profiles.push(newProfile)
 
         if (args.p_ctc || args.p_basic) {
-          const gross = Math.round((args.p_ctc || 0) / 12)
-          const basic = args.p_basic !== undefined ? Number(args.p_basic) : Math.round(gross * 0.40)
-          const hra = args.p_hra !== undefined ? Number(args.p_hra) : Math.round(basic * 0.50)
-          const da = args.p_da !== undefined ? Number(args.p_da) : Math.round(basic * 0.10)
-          const special_allowance = args.p_special_allowance !== undefined ? Number(args.p_special_allowance) : (gross - basic - hra - da)
-          const pf = args.p_pf !== undefined ? Number(args.p_pf) : Math.round(basic * 0.12)
-          const esi = args.p_esi !== undefined ? Number(args.p_esi) : (gross <= 21000 ? Math.round(gross * 0.0075) : 0)
-          const pt = args.p_pt !== undefined ? Number(args.p_pt) : (gross > 10000 ? 200 : 0)
-          const net = gross - pf - esi - pt
+          const { gross, basic, hra, da, special: special_allowance, pf, esi, pt, net } =
+            estimateWithOverrides(args.p_ctc, {
+              basic: args.p_basic,
+              hra: args.p_hra,
+              da: args.p_da,
+              special: args.p_special_allowance,
+              pf: args.p_pf,
+              esi: args.p_esi,
+              pt: args.p_pt,
+            })
 
           mockDatabase.salary_structures.push({
             id: 'ss-' + Math.random().toString(36).substr(2, 9),

@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
+import { estimateSalary } from '../lib/salaryEstimate'
 
 const MONTH_MAP = {
   January: 1, February: 2, March: 3, April: 4, May: 5, June: 6,
@@ -135,12 +136,17 @@ export function useReportsData(monthLabel, selectedDept = 'all', selectedEmpId =
         const slip = monthlyPayslips.find(p => p.employee_id === emp.id) || (payslips || []).find(p => p.employee_id === emp.id)
         const struct = (salaryStructures || []).find(s => s.employee_id === emp.id)
 
-        const gross = Number(slip?.gross ?? struct?.gross ?? Math.round(Number(emp.ctc || 0) / 12))
-        const basic = Number(slip?.basic ?? struct?.basic ?? Math.round(gross * 0.40))
-        const pf = Number(slip?.pf ?? struct?.pf ?? Math.round(basic * 0.12))
-        const esi = Number(slip?.esi ?? struct?.esi ?? (gross <= 21000 ? Math.round(gross * 0.0075) : 0))
-        const pt = Number(slip?.pt ?? struct?.pt ?? (gross > 10000 ? 200 : 0))
-        const net = Number(slip?.net ?? struct?.net_salary ?? Math.max(0, gross - pf - esi - pt))
+        // Recorded figures win. The estimate is only a fallback for an employee
+        // with no payslip and no saved structure, and it is the same estimate
+        // the rest of the app shows rather than a fifth variant of it.
+        const fallback = estimateSalary(emp.ctc)
+
+        const gross = Number(slip?.gross ?? struct?.gross ?? fallback.gross)
+        const basic = Number(slip?.basic ?? struct?.basic ?? fallback.basic)
+        const pf = Number(slip?.pf ?? struct?.pf ?? fallback.pf)
+        const esi = Number(slip?.esi ?? struct?.esi ?? fallback.esi)
+        const pt = Number(slip?.pt ?? struct?.pt ?? fallback.pt)
+        const net = Number(slip?.net ?? struct?.net_salary ?? (gross - pf - esi - pt))
         const pf_acc_no = emp.pan ? `MH/BOM/${emp.pan}/001` : `MH/BOM/${(emp.employee_id || emp.id.slice(0, 5)).toUpperCase()}/001`
 
         return {

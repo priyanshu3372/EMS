@@ -59,4 +59,8 @@ model Organization {
 
   attendance    Attendance[]
   leaveRequests LeaveRequest[]
+
+  salaryComponents         SalaryComponent[]
+  employeeSalaryComponents EmployeeSalaryComponent[]
+  esiCoverage              EsiCoverage[]
 }

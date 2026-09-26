@@ -264,7 +264,8 @@ export const getPtSlabs: RequestHandler = async (req, res) => {
       min_gross: num(row.minGross),
       max_gross: num(row.maxGross),
       amount: num(row.amount),
-      applicable_month: row.applicableMonth,
+      gender: row.gender,
+      february_amount: row.februaryAmount == null ? null : num(row.februaryAmount),
       effective_from: isoDate(row.effectiveFrom),
     })),
   )
