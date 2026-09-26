@@ -9,21 +9,9 @@ import BankVerificationModal from '../features/payroll/BankVerificationModal'
 import { useEmployees } from '../hooks/useEmployees'
 import { usePayrollRuns, useCreatePayrollRun, useUpdatePayrollRun, usePayslips, useSalaryStructures } from '../hooks/usePayroll'
 import { useAuthStore } from '../stores/authStore'
+import { estimateSalary } from '../lib/salaryEstimate'
 
 // ─── Salary computation ───────────────────────────────────────────────────────
-
-function computeSalary(ctc) {
-  const gross   = Math.round((ctc || 0) / 12)
-  const basic   = Math.round(gross * 0.40)
-  const hra     = Math.round(basic * 0.50)
-  const da      = Math.round(basic * 0.10)
-  const special = gross - basic - hra - da
-  const pf      = Math.round(basic * 0.12)
-  const esi     = gross <= 21000 ? Math.round(gross * 0.0075) : 0
-  const pt      = gross > 10000 ? 200 : 0
-  const net     = gross - pf - esi - pt
-  return { gross, basic, hra, da, special, pf, esi, pt, net }
-}
 
 function fmt(n) { return '₹' + Number(n || 0).toLocaleString('en-IN') }
 function initials(name) { return (name || '').split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase() }
@@ -732,7 +720,7 @@ export default function Payroll() {
   const employees = useMemo(() =>
     rawEmployees.map((e) => {
       const ss = salaryStructures.find((s) => s.employee_id === e.id || s.profiles?.id === e.id)
-      const computed = computeSalary(Number(e.ctc || ss?.ctc) || 0)
+      const computed = estimateSalary(Number(e.ctc || ss?.ctc) || 0)
       if (ss) {
         return {
           ...e,

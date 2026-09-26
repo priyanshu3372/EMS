@@ -31,6 +31,12 @@ export const importRowSchema = z.object({
   departmentId: z.uuid().optional(),
   designationId: z.uuid().optional(),
 
+  // Professional tax is gendered in several states, so a roster without it
+  // would leave every imported employee's PT undecided until edited by hand.
+  gender: z
+    .enum(['male', 'female', 'other'], { message: 'Use one of: male, female, other' })
+    .optional(),
+
   pan: z
     .string()
     .trim()

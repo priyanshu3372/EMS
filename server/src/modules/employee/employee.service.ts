@@ -1,6 +1,7 @@
 import type { Role } from '@prisma/client'
 import type { AppContext } from '../../platform/context'
-import { NotFound, Conflict, Forbidden } from '../../platform/errors/AppError'
+import { NotFound, Conflict, Forbidden, BadRequest } from '../../platform/errors/AppError'
+import { fromDateColumn, toDateColumn } from '../../domain/shared/dates'
 import { withTransaction } from '../../platform/db/transaction'
 import { logger } from '../../platform/logger'
 import { grantsMoreThan } from '../user/user.policy'
@@ -92,6 +93,8 @@ export interface CreateEmployeeInput {
   personalEmail?: string | null | undefined
   phone?: string | null | undefined
   dateOfJoining?: string | null | undefined
+  lastWorkingDate?: string | null | undefined
+  gender?: 'male' | 'female' | 'other' | null | undefined
   employmentType?: 'full_time' | 'part_time' | 'contract' | 'intern' | undefined
   departmentId?: string | null | undefined
   designationId?: string | null | undefined
@@ -107,6 +110,8 @@ export interface CreateEmployeeInput {
         pfAccountNumber?: string | null | undefined
         esiNumber?: string | null | undefined
         ptState?: string | null | undefined
+        pfApplicable?: boolean | undefined
+        hasPriorPfMembership?: boolean | null | undefined
       }
     | undefined
   login?: { email: string; role: Role } | undefined
@@ -117,6 +122,23 @@ export interface CreateEmployeeResult {
   access: repo.FieldAccess
   /** Present only when a login was requested. Shown once, never stored. */
   invite?: { token: string; expiresAt: Date } | undefined
+}
+
+/**
+ * Nobody leaves before they join.
+ *
+ * Checked here rather than in the validator because on an edit only one of the
+ * two dates may be in the body, and the other is whatever is already stored.
+ * Letting it through would give payroll an employment window that ends before
+ * it starts — which the salary engine reads as zero days and pays nothing,
+ * without anybody having decided that.
+ */
+function assertLeavesAfterJoining(dateOfJoining: string | null, lastWorkingDate: string | null): void {
+  if (dateOfJoining && lastWorkingDate && lastWorkingDate < dateOfJoining) {
+    throw BadRequest(
+      `The last working day (${lastWorkingDate}) cannot be before the joining date (${dateOfJoining})`,
+    )
+  }
 }
 
 /** Prisma's code for "a unique constraint was violated". */
@@ -136,6 +158,8 @@ export async function createEmployee(
   input: CreateEmployeeInput,
 ): Promise<CreateEmployeeResult> {
   let invite: { token: string; expiresAt: Date } | undefined
+
+  assertLeavesAfterJoining(input.dateOfJoining ?? null, input.lastWorkingDate ?? null)
 
   const employeeId = await withTransaction(ctx.db, async (tx) => {
     let membershipId: string | null = null
@@ -166,7 +190,9 @@ export async function createEmployee(
         fullName: input.fullName.trim(),
         personalEmail: input.personalEmail ?? null,
         phone: input.phone ?? null,
-        dateOfJoining: input.dateOfJoining ? new Date(input.dateOfJoining) : null,
+        dateOfJoining: input.dateOfJoining ? toDateColumn(input.dateOfJoining) : null,
+        lastWorkingDate: input.lastWorkingDate ? toDateColumn(input.lastWorkingDate) : null,
+        gender: input.gender ?? null,
         ...(input.employmentType ? { employmentType: input.employmentType } : {}),
         departmentId: input.departmentId ?? null,
         designationId: input.designationId ?? null,
@@ -188,6 +214,10 @@ export async function createEmployee(
           pfAccountNumber: input.statutory.pfAccountNumber ?? null,
           esiNumber: input.statutory.esiNumber ?? null,
           ptState: input.statutory.ptState ?? null,
+          ...(input.statutory.pfApplicable !== undefined
+            ? { pfApplicable: input.statutory.pfApplicable }
+            : {}),
+          hasPriorPfMembership: input.statutory.hasPriorPfMembership ?? null,
         },
       })
     }
@@ -220,6 +250,20 @@ export async function updateEmployee(
   const existing = await repo.findById(ctx.db, scope, id, access)
   if (!existing) throw NotFound('Employee not found')
 
+  // Whichever date the body leaves out is the one already stored.
+  assertLeavesAfterJoining(
+    input.dateOfJoining !== undefined
+      ? input.dateOfJoining
+      : existing.dateOfJoining
+        ? fromDateColumn(existing.dateOfJoining)
+        : null,
+    input.lastWorkingDate !== undefined
+      ? input.lastWorkingDate
+      : existing.lastWorkingDate
+        ? fromDateColumn(existing.lastWorkingDate)
+        : null,
+  )
+
   await withTransaction(ctx.db, async (tx) => {
     const data: Record<string, unknown> = {}
 
@@ -228,8 +272,12 @@ export async function updateEmployee(
     if (input.personalEmail !== undefined) data.personalEmail = input.personalEmail
     if (input.phone !== undefined) data.phone = input.phone
     if (input.dateOfJoining !== undefined) {
-      data.dateOfJoining = input.dateOfJoining ? new Date(input.dateOfJoining) : null
+      data.dateOfJoining = input.dateOfJoining ? toDateColumn(input.dateOfJoining) : null
     }
+    if (input.lastWorkingDate !== undefined) {
+      data.lastWorkingDate = input.lastWorkingDate ? toDateColumn(input.lastWorkingDate) : null
+    }
+    if (input.gender !== undefined) data.gender = input.gender
     if (input.employmentType !== undefined) data.employmentType = input.employmentType
     if (input.departmentId !== undefined) data.departmentId = input.departmentId
     if (input.designationId !== undefined) data.designationId = input.designationId
@@ -253,6 +301,10 @@ export async function updateEmployee(
           ...(s.pfAccountNumber !== undefined ? { pfAccountNumber: s.pfAccountNumber } : {}),
           ...(s.esiNumber !== undefined ? { esiNumber: s.esiNumber } : {}),
           ...(s.ptState !== undefined ? { ptState: s.ptState } : {}),
+          ...(s.pfApplicable !== undefined ? { pfApplicable: s.pfApplicable } : {}),
+          ...(s.hasPriorPfMembership !== undefined
+            ? { hasPriorPfMembership: s.hasPriorPfMembership }
+            : {}),
         },
         create: {
           organizationId: ctx.organizationId,
@@ -262,6 +314,8 @@ export async function updateEmployee(
           pfAccountNumber: s.pfAccountNumber ?? null,
           esiNumber: s.esiNumber ?? null,
           ptState: s.ptState ?? null,
+          ...(s.pfApplicable !== undefined ? { pfApplicable: s.pfApplicable } : {}),
+          hasPriorPfMembership: s.hasPriorPfMembership ?? null,
         },
       })
     }

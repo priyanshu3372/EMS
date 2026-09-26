@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 import { sendNotification } from './useNotifications'
+import { estimateWithOverrides } from '../lib/salaryEstimate'
 
 export function useEmployees() {
   return useQuery({
@@ -60,15 +61,8 @@ export function useCreateEmployee() {
       }
 
       if (data && (ctc > 0 || form.basic !== undefined)) {
-        const gross = Math.round(ctc / 12)
-        const basic = form.basic !== undefined && form.basic !== '' ? Number(form.basic) : Math.round(gross * 0.40)
-        const hra = form.hra !== undefined && form.hra !== '' ? Number(form.hra) : Math.round(basic * 0.50)
-        const da = form.da !== undefined && form.da !== '' ? Number(form.da) : Math.round(basic * 0.10)
-        const special_allowance = form.special_allowance !== undefined && form.special_allowance !== '' ? Number(form.special_allowance) : (gross - basic - hra - da)
-        const pf = form.pf !== undefined && form.pf !== '' ? Number(form.pf) : Math.round(basic * 0.12)
-        const esi = form.esi !== undefined && form.esi !== '' ? Number(form.esi) : (gross <= 21000 ? Math.round(gross * 0.0075) : 0)
-        const pt = form.pt !== undefined && form.pt !== '' ? Number(form.pt) : (gross > 10000 ? 200 : 0)
-        const net = gross - pf - esi - pt
+        const { gross, basic, hra, da, special: special_allowance, pf, esi, pt, net } =
+          estimateWithOverrides(ctc, { ...form, special: form.special_allowance })
 
         await supabase.from('salary_structures').upsert({
           employee_id: data,
@@ -125,15 +119,17 @@ export function useUpdateEmployee() {
 
       if (id && (ctc !== undefined || basic !== undefined)) {
         const numericCtc = Number(ctc) || 0
-        const gross = Math.round(numericCtc / 12)
-        const numBasic = basic !== undefined && basic !== '' ? Number(basic) : Math.round(gross * 0.40)
-        const numHra = hra !== undefined && hra !== '' ? Number(hra) : Math.round(numBasic * 0.50)
-        const numDa = da !== undefined && da !== '' ? Number(da) : Math.round(numBasic * 0.10)
-        const numSpecial = special_allowance !== undefined && special_allowance !== '' ? Number(special_allowance) : (gross - numBasic - numHra - numDa)
-        const numPf = pf !== undefined && pf !== '' ? Number(pf) : Math.round(numBasic * 0.12)
-        const numEsi = esi !== undefined && esi !== '' ? Number(esi) : (gross <= 21000 ? Math.round(gross * 0.0075) : 0)
-        const numPt = pt !== undefined && pt !== '' ? Number(pt) : (gross > 10000 ? 200 : 0)
-        const net = gross - numPf - numEsi - numPt
+        const {
+          gross,
+          basic: numBasic,
+          hra: numHra,
+          da: numDa,
+          special: numSpecial,
+          pf: numPf,
+          esi: numEsi,
+          pt: numPt,
+          net,
+        } = estimateWithOverrides(numericCtc, { basic, hra, da, special: special_allowance, pf, esi, pt })
 
         await supabase.from('salary_structures').upsert({
           employee_id: id,

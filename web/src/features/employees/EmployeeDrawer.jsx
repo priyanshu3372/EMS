@@ -5,6 +5,7 @@ import {
 } from 'lucide-react'
 import { useSalaryStructures } from '../../hooks/usePayroll'
 import BankVerificationModal from '../payroll/BankVerificationModal'
+import { estimateSalary } from '../../lib/salaryEstimate'
 
 const STATUS_CLASS = {
   active: 'bg-green-100 text-green-700',
@@ -16,19 +17,6 @@ const EMP_TYPE_CLASS = {
   'Part-time': 'bg-amber-100 text-amber-700',
   Contract: 'bg-purple-100 text-purple-700',
   Intern: 'bg-teal-100 text-teal-700',
-}
-
-function computeSalary(ctc) {
-  const gross = Math.round((ctc || 0) / 12)
-  const basic = Math.round(gross * 0.40)
-  const hra = Math.round(basic * 0.50)
-  const da = Math.round(basic * 0.10)
-  const special = Math.max(0, gross - basic - hra - da)
-  const pf = Math.round(basic * 0.12)
-  const esi = gross <= 21000 ? Math.round(gross * 0.0075) : 0
-  const pt = gross > 10000 ? 200 : 0
-  const net = Math.max(0, gross - pf - esi - pt)
-  return { gross, basic, hra, da, special, pf, esi, pt, net }
 }
 
 function fmt(n) { return '₹' + Number(n || 0).toLocaleString('en-IN') }
@@ -43,7 +31,7 @@ export default function EmployeeDrawer({ employee, onClose, onEdit }) {
   const initials = employee.full_name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()
   const ssRecord = salaryStructures.find(s => s.employee_id === employee.id || s.profiles?.id === employee.id)
   const ctcVal = employee.ctc || ssRecord?.ctc || 0
-  const computed = computeSalary(ctcVal)
+  const computed = estimateSalary(ctcVal)
 
   const grossMonthly = ssRecord?.gross ?? computed.gross
   const basic = ssRecord?.basic ?? computed.basic

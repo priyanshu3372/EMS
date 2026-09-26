@@ -3,6 +3,7 @@ import request from 'supertest'
 import { createApp } from '../../app'
 import { prisma } from '../../platform/db/prisma'
 import { hashPassword } from '../../platform/auth/password'
+import { zonedToday } from '../../domain/shared/dates'
 
 /**
  * Deciding on leave, and the dashboard that shows the result.
@@ -435,7 +436,12 @@ describe('the dashboard, and the numbers it used to invent', () => {
   })
 
   it('gives an employee their own month, with hours', async () => {
-    const today = new Date().toISOString().slice(0, 10)
+    // The COMPANY'S today, not UTC's. The organization is Asia/Kolkata, so
+    // between midnight and 05:30 IST the UTC date is still yesterday — a test
+    // that writes attendance for the UTC day passes all afternoon and fails
+    // overnight. This is the exact mistake `zonedToday` exists to stop, and
+    // the test had made it.
+    const today = zonedToday(new Date(), 'Asia/Kolkata')
     await prisma.attendance.create({
       data: {
         organizationId: orgId,

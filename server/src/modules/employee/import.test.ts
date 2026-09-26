@@ -282,6 +282,39 @@ describe('the real import', () => {
   })
 })
 
+describe('gender, which professional tax depends on', () => {
+  const GENDER_HEADER = 'employee_code,full_name,gender'
+
+  it('reads the spellings an old system exports', async () => {
+    const csv = [
+      GENDER_HEADER,
+      `${PREFIX}-E1,Asha Menon,F`,
+      `${PREFIX}-E2,Rahul Nair,Male`,
+      `${PREFIX}-E3,Sam Iyer,`,
+    ].join('\n')
+
+    const res = await upload(csv, false)
+    expect(res.status).toBe(201)
+
+    const genders = await prisma.employee.findMany({
+      where: { employeeCode: { startsWith: `${PREFIX}-E` } },
+      orderBy: { employeeCode: 'asc' },
+      select: { gender: true },
+    })
+
+    // Blank is left unrecorded — not guessed from a name, which is exactly the
+    // kind of inference that is wrong often enough to matter.
+    expect(genders.map((g) => g.gender)).toEqual(['female', 'male', null])
+  })
+
+  it('names a value it cannot read, rather than dropping it', async () => {
+    const csv = [GENDER_HEADER, `${PREFIX}-E1,Asha Menon,femail`].join('\n')
+    const res = await upload(csv)
+
+    expect(JSON.stringify(res.body.data.rows[0].issues)).toMatch(/male, female, other/)
+  })
+})
+
 describe('NONE of them can log in until they set a password', () => {
   const csv = [
     HEADER,

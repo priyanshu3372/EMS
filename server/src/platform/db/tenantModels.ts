@@ -29,6 +29,9 @@ export const TENANT_MODELS = [
   'GeofenceLocation',
   'Attendance',
   'LeaveRequest',
+  'SalaryComponent',
+  'EsiCoverage',
+  'EmployeeSalaryComponent',
 ] as const
 
 export const TENANT_MODEL_SET: ReadonlySet<string> = new Set(TENANT_MODELS)

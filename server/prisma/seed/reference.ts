@@ -59,30 +59,58 @@ const LEAVE_TYPES = [
 
 
 /**
+ * The client's confirmed salary structure (§A13): Basic, HRA, DA, Conveyance,
+ * Special Allowance, Incentive.
+ *
+ * ROWS, NOT COLUMNS. Every one of these is a record the company can rename,
+ * reorder or archive, and adding a seventh is an insert rather than a migration
+ * plus a deploy. The old system had them as fixed columns, which is why nobody
+ * could add "Shift Allowance" without an engineer.
+ *
+ * `countsForPf` is the consequential flag, and it is only true for Basic and
+ * DA here. Per the 2019 Supreme Court ruling an allowance paid ordinarily and
+ * universally to everybody DOES form part of PF wages — so a special allowance
+ * that everyone receives may well belong in the base. That is a judgement about
+ * this company's pay structure, and it is the accountant's to make, not a
+ * default to guess at. These values are a starting point they must confirm.
+ */
+const SALARY_COMPONENTS = [
+  { code: 'BASIC', label: 'Basic', type: 'earning', countsForPf: true, taxable: true, displayOrder: 1 },
+  { code: 'DA', label: 'Dearness Allowance', type: 'earning', countsForPf: true, taxable: true, displayOrder: 2 },
+  { code: 'HRA', label: 'House Rent Allowance', type: 'earning', countsForPf: false, taxable: true, displayOrder: 3 },
+  { code: 'CONV', label: 'Conveyance', type: 'earning', countsForPf: false, taxable: true, displayOrder: 4 },
+  { code: 'SPECIAL', label: 'Special Allowance', type: 'earning', countsForPf: false, taxable: true, displayOrder: 5 },
+  // Entered per employee per month, never on a salary record (§A1.5).
+  { code: 'INCENTIVE', label: 'Incentive', type: 'earning', countsForPf: false, taxable: true, displayOrder: 6, entry: 'monthly' },
+] as const
+
+/**
  * Maharashtra professional tax.
  *
- * Seeded because it is statutory, published, and stable — not a guess. Every
+ * Seeded because it is statutory, published and stable — not a guess. Every
  * company operating in Maharashtra owes exactly these amounts, so leaving the
  * table empty would mean payroll silently deducting nothing.
  *
- * TWO THINGS THE CLIENT MUST CONFIRM, rather than being assumed here:
+ * GENDERED, because the state is. Women pay nothing up to ₹25,000 where men
+ * pay from ₹7,500 — applying the men's slabs to everybody over-deducts ₹200 a
+ * month from every woman on the payroll, which nobody notices for a year and
+ * then somebody does.
  *
- *   1. Maharashtra levies a DIFFERENT amount for women (nil up to ₹25,000).
- *      Employee has no gender field — nobody asked for one — so these slabs
- *      apply to everybody. If the client employs women in Maharashtra this is
- *      over-deducting, and it needs a gender field plus gendered slabs.
- *   2. Other states are NOT seeded. An employee whose ptState is Karnataka
- *      will match no slab and have no PT deducted, which is visible rather
- *      than wrong — but it has to be entered before their first payslip.
+ * ₹200 for eleven months and ₹300 in February is how the state reaches ₹2,500 a
+ * year — the constitutional cap — without a fractional monthly figure.
+ *
+ * OTHER STATES ARE NOT SEEDED. An employee whose ptState is Karnataka matches
+ * no slab and has no PT deducted. That is visible rather than wrong, but it has
+ * to be entered before their first payslip.
  */
 const MAHARASHTRA_PT = [
-  { minGross: 0, maxGross: 7500, amount: 0, applicableMonth: 0 },
-  { minGross: 7500.01, maxGross: 10000, amount: 175, applicableMonth: 0 },
-  // ₹200 for eleven months and ₹300 in February, which is how the state
-  // collects ₹2,500 a year without a fractional monthly amount.
-  { minGross: 10000.01, maxGross: null, amount: 200, applicableMonth: 0 },
-  { minGross: 10000.01, maxGross: null, amount: 300, applicableMonth: 2 },
-]
+  { gender: 'male', minGross: 0, maxGross: 7500, amount: 0, februaryAmount: null },
+  { gender: 'male', minGross: 7500.01, maxGross: 10000, amount: 175, februaryAmount: null },
+  { gender: 'male', minGross: 10000.01, maxGross: null, amount: 200, februaryAmount: 300 },
+
+  { gender: 'female', minGross: 0, maxGross: 25000, amount: 0, februaryAmount: null },
+  { gender: 'female', minGross: 25000.01, maxGross: null, amount: 200, februaryAmount: 300 },
+] as const
 
 /**
  * Only the three fixed-date national holidays.
@@ -110,16 +138,24 @@ async function seedStatutory(organizationId: string): Promise<void> {
   for (const slab of MAHARASHTRA_PT) {
     await prisma.ptSlab.upsert({
       where: {
-        organizationId_state_minGross_effectiveFrom_applicableMonth: {
+        organizationId_state_gender_minGross_effectiveFrom: {
           organizationId,
           state: 'Maharashtra',
+          gender: slab.gender,
           minGross: slab.minGross,
           effectiveFrom,
-          applicableMonth: slab.applicableMonth,
         },
       },
       update: {},
       create: { organizationId, state: 'Maharashtra', effectiveFrom, ...slab },
+    })
+  }
+
+  for (const component of SALARY_COMPONENTS) {
+    await prisma.salaryComponent.upsert({
+      where: { organizationId_code: { organizationId, code: component.code } },
+      update: {},
+      create: { organizationId, ...component },
     })
   }
 

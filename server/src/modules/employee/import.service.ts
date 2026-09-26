@@ -84,6 +84,20 @@ const HEADER_ALIASES: Record<string, string[]> = {
   department: ['department', 'dept'],
   designation: ['designation', 'title', 'job_title'],
   pan: ['pan', 'pan_number'],
+  gender: ['gender', 'sex'],
+}
+
+/**
+ * The spellings a previous system is likely to have exported. M and F are
+ * unambiguous; anything else is passed through as typed so the validator can
+ * name it in the row's error rather than it being silently dropped.
+ */
+function normaliseGender(value: string | undefined): string | undefined {
+  const cleaned = (value ?? '').trim().toLowerCase()
+  if (!cleaned) return undefined
+  if (cleaned === 'm') return 'male'
+  if (cleaned === 'f') return 'female'
+  return cleaned
 }
 
 function normaliseHeader(header: string): string {
@@ -202,6 +216,7 @@ export async function importEmployees(
       phone: (raw.phone ?? '').trim() || undefined,
       employmentType: (raw.employmentType ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_') || undefined,
       pan: (raw.pan ?? '').trim().toUpperCase() || undefined,
+      gender: normaliseGender(raw.gender),
     }
 
     const rawDate = (raw.dateOfJoining ?? '').trim()
@@ -373,6 +388,7 @@ export async function importEmployees(
             : {}),
           departmentId: data.departmentId ?? null,
           designationId: data.designationId ?? null,
+          ...(data.gender ? { gender: data.gender as 'male' | 'female' | 'other' } : {}),
         },
       })
 

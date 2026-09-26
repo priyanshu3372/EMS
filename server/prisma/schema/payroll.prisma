@@ -1,0 +1,149 @@
+/// Salary structure as ROWS, not columns.
+///
+/// The client's confirmed list is Basic, HRA, DA, Conveyance, Special Allowance
+/// and Incentive (§A1.5) — but it is a list they chose, not a law. Modelling it
+/// as columns means the day they want a "Site Allowance" it becomes a
+/// migration, a schema change and a deployment. As rows it is somebody adding a
+/// line in Settings.
+model SalaryComponent {
+  id             String @id @default(uuid())
+  organizationId String
+
+  /// Short code used on the payslip and in exports: BASIC, HRA, DA.
+  code  String
+  label String
+
+  type ComponentType @default(earning)
+
+  /// Where the amount comes from: the salary record, or a fresh entry each
+  /// month.
+  ///
+  /// The client's own rule (§A1.5): Incentive "is manually entered, not
+  /// computed — an authorised role sets the amount per employee per month".
+  /// Stored on the salary record instead, it would be paid every month at the
+  /// same figure, which is a raise wearing an incentive's name. And it would be
+  /// prorated for a short month, when an incentive is a sum somebody decided on
+  /// rather than a rate for days worked.
+  entry ComponentEntry @default(fixed)
+
+  /// Whether this forms part of PF wages.
+  ///
+  /// NOT a fixed answer. The 2019 Supreme Court ruling says an allowance that
+  /// is ordinarily and universally paid counts — so a "special allowance" paid
+  /// to everybody may well be PF wages. Which ones count is the accountant's
+  /// call, recorded here rather than assumed in code.
+  countsForPf Boolean @default(false)
+
+  /// Whether it is taxable. Conveyance had an exemption until 2018 and things
+  /// like this change; a flag survives the change, a hardcoded rule does not.
+  taxable Boolean @default(true)
+
+  /// Display order on the payslip. Earnings and deductions each ordered within
+  /// their own section.
+  displayOrder Int @default(0)
+
+  createdAt  DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt  DateTime  @updatedAt @db.Timestamptz(3)
+  archivedAt DateTime? @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  /// NoAction, not Cascade: deleting a component that somebody is paid would
+  /// silently remove it from their salary, so it is refused — archive instead.
+  /// NoAction rather than Restrict because Postgres checks RESTRICT the instant
+  /// a row goes, so deleting a whole organization could trip it mid-cascade;
+  /// NoAction waits until the statement finishes and both rows are gone.
+  employeeAmounts EmployeeSalaryComponent[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId, archivedAt])
+}
+
+enum ComponentType {
+  earning
+  deduction
+}
+
+/// How a salary component gets its amount.
+enum ComponentEntry {
+  /// On the effective-dated salary record. Prorated by paid days.
+  fixed
+  /// Entered for one employee for one month, and paid as entered. Never
+  /// prorated, never carried to the next month, never guessed when missing.
+  monthly
+}
+
+/// Whether one employee is covered by ESI for one contribution period.
+///
+/// THE WHOLE POINT OF THIS TABLE is that the answer is decided ONCE, at the
+/// start of the period or on joining, and then does not change. The current
+/// code re-tests every month (Payroll.jsx:23), which produces an employee who
+/// drifts in and out of ESI as their gross moves — wrong, and impossible to
+/// explain to them.
+///
+/// Periods are 1 Apr–30 Sep and 1 Oct–31 Mar. Somebody covered in April stays
+/// covered until September even after a raise; somebody above the threshold in
+/// April stays out until October even if their wages fall.
+model EsiCoverage {
+  id             String @id @default(uuid())
+  organizationId String
+  employeeId     String
+
+  periodStart DateTime @db.Date
+  periodEnd   DateTime @db.Date
+
+  covered Boolean
+
+  /// The wage RATE the decision was made on — not the amount paid that month.
+  /// Stored so the decision can be explained a year later without recomputing
+  /// it from data that has since changed.
+  lockedWageRate Decimal @db.Decimal(12, 2)
+
+  /// Why, in words. "Wage rate 19,000 at period start, threshold 21,000."
+  reason String
+
+  decidedAt DateTime @default(now()) @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employee     Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, employeeId, periodStart])
+  @@index([organizationId, periodStart])
+}
+
+/// One component of one person's pay, at one point in their salary history.
+///
+/// The amount lives here rather than in a column on EmployeeFinancial so that
+/// the set of components is DATA. A company that adds "Shift Allowance" inserts
+/// a SalaryComponent and starts filling in amounts; nobody migrates anything.
+///
+/// Hangs off EmployeeFinancial rather than off Employee directly, so a raise is
+/// a new effective-dated envelope with its own set of amounts and the old one
+/// stays exactly as it was. Recomputing an old payslip has to see the old
+/// numbers, and that is only true if the old numbers were never overwritten.
+model EmployeeSalaryComponent {
+  id             String @id @default(uuid())
+  organizationId String
+
+  employeeFinancialId String
+  salaryComponentId   String
+
+  /// Decimal, never Float — the monthly amount at a full month's attendance.
+  /// Proration happens at calculation time and is never stored here.
+  amount Decimal @db.Decimal(12, 2)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  financial    EmployeeFinancial @relation(fields: [employeeFinancialId], references: [id], onDelete: Cascade)
+  component    SalaryComponent   @relation(fields: [salaryComponentId], references: [id], onDelete: NoAction)
+
+  /// One amount per component per salary record. Without this a duplicate row
+  /// silently doubles somebody's HRA, and the payslip still adds up.
+  /// organizationId leads, as on every compound unique here — the tenant
+  /// conformance test insists, so that no lookup by this key can ever be
+  /// answered from another company's rows. It also serves as the index for
+  /// "this salary record's components", so no separate index is needed.
+  @@unique([organizationId, employeeFinancialId, salaryComponentId])
+}

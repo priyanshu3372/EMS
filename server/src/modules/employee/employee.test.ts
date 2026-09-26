@@ -126,14 +126,30 @@ beforeAll(async () => {
 
   // Sensitive data, attached to the stranger so every role's view of one row
   // can be compared directly.
+  // Components are rows now: the catalogue first, then the amounts against it.
+  const [basicComponent, hraComponent, shiftComponent] = await Promise.all(
+    [
+      { code: 'BASIC', label: 'Basic', displayOrder: 1, countsForPf: true },
+      { code: 'HRA', label: 'House Rent Allowance', displayOrder: 3, countsForPf: false },
+      // A component the company added itself. It has no column anywhere and
+      // never did — which is the point of components being rows.
+      { code: 'SHIFT', label: 'Shift Allowance', displayOrder: 7, countsForPf: false },
+    ].map((c) => prisma.salaryComponent.create({ data: { organizationId: orgId, ...c } })),
+  )
+
   await prisma.employeeFinancial.create({
     data: {
       organizationId: orgId,
       employeeId: strangerEmpId,
       ctc: 900000,
-      basic: 360000,
-      hra: 180000,
       effectiveFrom: new Date('2026-04-01'),
+      components: {
+        create: [
+          { organizationId: orgId, salaryComponentId: basicComponent!.id, amount: 30000 },
+          { organizationId: orgId, salaryComponentId: hraComponent!.id, amount: 15000 },
+          { organizationId: orgId, salaryComponentId: shiftComponent!.id, amount: 5000 },
+        ],
+      },
     },
   })
   await prisma.employeeBankAccount.create({
@@ -341,6 +357,7 @@ describe('which fields you can see', () => {
     const res = await getAs('super_admin', strangerEmpId)
 
     expect(res.body.data.ctc).toBe(900000)
+    expect(res.body.data.basic).toBe(30000)
     expect(res.body.data.bank_account).toBe('00123456789')
     expect(res.body.data.pan).toBe('ABCDE1234F')
     expect(res.body.meta.fields).toEqual({
@@ -364,6 +381,30 @@ describe('which fields you can see', () => {
     const res = await getAs('super_admin', strangerEmpId)
     expect(JSON.stringify(res.body)).not.toContain('proofKey')
     expect(res.body.data).not.toHaveProperty('proof_key')
+  })
+
+  it('reads salary components from rows, including ones that never had a column', async () => {
+    const res = await getAs('super_admin', strangerEmpId)
+
+    // The same flat keys every screen already reads, derived from the rows.
+    expect(res.body.data.basic).toBe(30000)
+    expect(res.body.data.hra).toBe(15000)
+
+    // Incentive is entered per month, so a salary record carries no such key.
+    expect(res.body.data).not.toHaveProperty('incentive')
+
+    // A component this person is not paid is null, not zero.
+    expect(res.body.data.da).toBeNull()
+
+    // And the full list, in display order, for a screen that renders whatever
+    // components the company has without knowing their names in advance.
+    // Shift Allowance appears with no code change anywhere: a company adds a
+    // component and it is on the record the same day.
+    expect(res.body.data.components).toEqual([
+      { code: 'BASIC', label: 'Basic', type: 'earning', amount: 30000 },
+      { code: 'HRA', label: 'House Rent Allowance', type: 'earning', amount: 15000 },
+      { code: 'SHIFT', label: 'Shift Allowance', type: 'earning', amount: 5000 },
+    ])
   })
 
   it('reports an unknown salary as null, never as zero', async () => {

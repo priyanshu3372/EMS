@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { X, IndianRupee, Calculator, SlidersHorizontal, Info } from 'lucide-react'
 import { useEmployees, useCreateEmployee, useUpdateEmployee } from '../../hooks/useEmployees'
 import { useSalaryStructures } from '../../hooks/usePayroll'
+import { estimateSalary } from '../../lib/salaryEstimate'
 
 const DEPARTMENTS = ['Engineering', 'Sales', 'HR', 'Finance', 'Operations', 'Marketing', 'Design', 'Product']
 const DESIGNATIONS = ['Software Engineer', 'Senior Engineer', 'Tech Lead', 'Manager', 'Senior Manager', 'Director', 'Analyst', 'Executive', 'Intern']
@@ -16,20 +17,6 @@ const EMPTY = {
   ctc: '', basic: '', hra: '', da: '', special_allowance: '', pf: '', esi: '', pt: '',
   bank_name: '', bank_account: '', bank_account_holder_name: '', ifsc: '', bank_branch: '', bank_account_type: 'Savings',
   isCustomSalary: false
-}
-
-function computeSalary(ctc) {
-  const annual = Number(ctc) || 0
-  const gross = Math.round(annual / 12)
-  const basic = Math.round(gross * 0.40)
-  const hra = Math.round(basic * 0.50)
-  const da = Math.round(basic * 0.10)
-  const special = Math.max(0, gross - basic - hra - da)
-  const pf = Math.round(basic * 0.12)
-  const esi = gross <= 21000 ? Math.round(gross * 0.0075) : 0
-  const pt = gross > 10000 ? 200 : 0
-  const net = Math.max(0, gross - pf - esi - pt)
-  return { gross, basic, hra, da, special, pf, esi, pt, net }
 }
 
 function fmtCurrency(val) {
@@ -72,7 +59,7 @@ export default function AddEmployeeModal({ open, onClose, initial = null, onSave
   }, [open, initial, salaryStructures])
 
   const computedSalary = useMemo(() => {
-    return computeSalary(form.ctc)
+    return estimateSalary(form.ctc)
   }, [form.ctc])
 
   if (!open) return null

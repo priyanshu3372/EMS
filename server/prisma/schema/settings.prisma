@@ -84,6 +84,14 @@ model PtSlab {
   /// Matched against EmployeeStatutoryIdentity.ptState.
   state String
 
+  /// Maharashtra exempts women up to ₹25,000 where men pay from ₹7,500.
+  /// Applying the mens slabs to everybody over-deducts ₹200 a month from
+  /// every woman in the company — invisible for a year, and then very visible.
+  ///
+  /// `any` applies to everybody, and a gendered rule wins over it — so a state
+  /// that makes no distinction needs one row rather than two.
+  gender PtGender @default(any)
+
   /// Inclusive lower bound of monthly gross.
   minGross Decimal  @db.Decimal(12, 2)
   /// Null means "and above" — the top slab has no ceiling.
@@ -91,15 +99,17 @@ model PtSlab {
 
   amount Decimal @db.Decimal(10, 2)
 
-  /// Some states levy a different amount in one month of the year —
-  /// Maharashtra charges ₹300 in February instead of ₹200.
+  /// What February costs, when a state charges a different amount that month.
   ///
-  /// ZERO means "every month", and it is zero rather than null on purpose.
-  /// Postgres treats NULL as distinct from NULL, so a unique constraint
-  /// containing a nullable column does not actually prevent duplicates — two
-  /// identical every-month slabs would both insert happily. A sentinel value
-  /// makes the constraint do what it says.
-  applicableMonth Int @default(0)
+  /// Maharashtra takes ₹300 in February instead of ₹200: eleven months at 200
+  /// plus one at 300 is exactly ₹2,500 — the constitutional annual cap, reached
+  /// without a fractional monthly figure.
+  ///
+  /// A column on the same row rather than a second row carrying a month number.
+  /// Two rows would need a nullable month inside the unique constraint, and
+  /// Postgres treats NULL as distinct from NULL — so that constraint would not
+  /// actually prevent duplicates. Null here means "the same every month".
+  februaryAmount Decimal? @db.Decimal(10, 2)
 
   effectiveFrom DateTime  @db.Date
   effectiveTo   DateTime? @db.Date
@@ -109,8 +119,8 @@ model PtSlab {
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
-  @@unique([organizationId, state, minGross, effectiveFrom, applicableMonth])
-  @@index([organizationId, state])
+  @@unique([organizationId, state, gender, minGross, effectiveFrom])
+  @@index([organizationId, state, gender])
 }
 
 model Holiday {
@@ -192,4 +202,12 @@ model GeofenceLocation {
 
   @@unique([organizationId, name])
   @@index([organizationId, isActive])
+}
+
+/// Who a professional-tax slab applies to.
+enum PtGender {
+  male
+  female
+  /// Everybody. Used by states that make no distinction between the two.
+  any
 }

@@ -1,9 +1,13 @@
 {
-  "generatedAt": "2026-09-21",
+  "generatedAt": "2026-09-26",
   "note": "Field names the frontend reads today, pinned before each module moves off Supabase. A serializer that stops sending one of these will render an empty cell rather than an error, so check new serializers against this list. Regenerate with: cd server && npm run field-contract",
-  "fieldCount": 90,
+  "fieldCount": 118,
   "allFields": [
+    "absent_days",
+    "absent_today",
+    "annual_quota",
     "applied_on",
+    "attendance_mode",
     "bank_account",
     "bank_account_holder_name",
     "bank_account_type",
@@ -13,7 +17,9 @@
     "bank_proof_url",
     "bank_verification_remarks",
     "bank_verification_status",
+    "by_department",
     "carry_forward",
+    "carry_forward_cap",
     "casual_bal",
     "check_in",
     "check_in_lat",
@@ -24,6 +30,7 @@
     "date_format",
     "date_of_joining",
     "distance_km",
+    "distance_meters",
     "doc_type",
     "document_verification_status",
     "earned_bal",
@@ -42,10 +49,18 @@
     "full_name",
     "geofence_verified",
     "half_day",
+    "half_days",
+    "hours_worked",
+    "is_weekly_off_today",
     "leave_balances",
+    "leave_days",
     "leave_type",
+    "leave_type_id",
     "legal_name",
     "net_salary",
+    "not_marked_today",
+    "on_leave",
+    "on_leave_today",
     "p_basic",
     "p_ctc",
     "p_da",
@@ -70,14 +85,21 @@
     "pay_day",
     "payroll_run_id",
     "payslip_lock",
+    "pending_leave_count",
+    "pending_leaves",
     "pf_acc_no",
     "pf_employee",
     "pf_employer",
+    "present_days",
+    "present_today",
     "processed_at",
     "pt_slab1_amount",
     "pt_slab1_limit",
     "pt_slab2_amount",
     "pt_state",
+    "radius_km",
+    "recent_joiners",
+    "recent_leaves",
     "remaining_days",
     "reporting_manager_designation",
     "reporting_manager_id",
@@ -85,13 +107,19 @@
     "salary_structures",
     "sick_bal",
     "special_allowance",
+    "this_month",
+    "this_week",
     "to_date",
     "total_days",
+    "total_employees",
+    "total_hours",
     "total_net",
     "user_id",
     "user_passwords",
     "verification_remarks",
     "verified_at",
+    "weekly_off_days",
+    "weekly_off_today",
     "wfh_bal"
   ],
   "byFile": {
@@ -120,7 +148,14 @@
       "check_out",
       "full_name"
     ],
+    "web/src/features/attendance/PunchCard.jsx": [
+      "check_in",
+      "check_out",
+      "distance_meters",
+      "hours_worked"
+    ],
     "web/src/features/dashboard/EmployeeDashboard.jsx": [
+      "attendance_mode",
       "date_of_joining",
       "from_date",
       "full_name",
@@ -188,14 +223,31 @@
       "employee_id",
       "full_name"
     ],
-    "web/src/hooks/useAttendance.js": [
-      "employee_id"
+    "web/src/features/settings/WeeklyOffPicker.jsx": [
+      "weekly_off_days"
     ],
     "web/src/hooks/useDashboard.js": [
-      "comp_off",
-      "date_of_joining",
-      "employee_id",
-      "leave_type"
+      "absent_days",
+      "absent_today",
+      "by_department",
+      "half_days",
+      "is_weekly_off_today",
+      "leave_balances",
+      "leave_days",
+      "not_marked_today",
+      "on_leave",
+      "on_leave_today",
+      "pending_leave_count",
+      "pending_leaves",
+      "present_days",
+      "present_today",
+      "recent_joiners",
+      "recent_leaves",
+      "this_month",
+      "this_week",
+      "total_employees",
+      "total_hours",
+      "weekly_off_today"
     ],
     "web/src/hooks/useEmployees.js": [
       "bank_account",
@@ -211,10 +263,6 @@
       "reporting_manager_id",
       "reporting_manager_name",
       "special_allowance"
-    ],
-    "web/src/hooks/useLeave.js": [
-      "employee_id",
-      "leave_type"
     ],
     "web/src/hooks/usePayroll.js": [
       "employee_id"
@@ -293,11 +341,13 @@
       "full_name"
     ],
     "web/src/pages/Leave.jsx": [
+      "annual_quota",
       "applied_on",
       "employee_id",
       "from_date",
       "full_name",
       "leave_type",
+      "leave_type_id",
       "to_date"
     ],
     "web/src/pages/Payroll.jsx": [
@@ -324,6 +374,7 @@
     ],
     "web/src/pages/Settings.jsx": [
       "carry_forward",
+      "carry_forward_cap",
       "date_format",
       "esi_employee",
       "esi_employer",
@@ -338,7 +389,8 @@
       "pt_slab1_amount",
       "pt_slab1_limit",
       "pt_slab2_amount",
-      "pt_state"
+      "pt_state",
+      "radius_km"
     ]
   }
 }
